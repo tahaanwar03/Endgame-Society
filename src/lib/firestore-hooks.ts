@@ -1,0 +1,304 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  arrayRemove,
+  arrayUnion,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+  writeBatch,
+  type DocumentData
+} from "firebase/firestore";
+import { getFirebaseServices } from "@/lib/firebase";
+import type { Match, MatchResult, Player, Tournament, TournamentStatus } from "@/lib/types";
+
+type CollectionState<T> = {
+  data: T[];
+  loading: boolean;
+  error: string | null;
+};
+
+type DocumentState<T> = {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+};
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function asNullableNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function asResult(value: unknown): MatchResult {
+  return value === "1-0" || value === "0-1" || value === "1/2-1/2" ? value : null;
+}
+
+function asStatus(value: unknown): TournamentStatus {
+  return value === "ongoing" || value === "completed" ? value : "upcoming";
+}
+
+function normalizeTournament(id: string, data: DocumentData): Tournament {
+  return {
+    id,
+    name: asString(data.name),
+    date: asString(data.date),
+    rounds: asNumber(data.rounds),
+    status: asStatus(data.status),
+    player_ids: asStringArray(data.player_ids)
+  };
+}
+
+function normalizePlayer(id: string, data: DocumentData): Player {
+  return {
+    id,
+    name: asString(data.name),
+    elo: asNullableNumber(data.elo)
+  };
+}
+
+function normalizeMatch(id: string, data: DocumentData): Match {
+  return {
+    id,
+    tournament_id: asString(data.tournament_id),
+    round: asNumber(data.round, 1),
+    player1_id: asString(data.player1_id),
+    player2_id: asString(data.player2_id),
+    result: asResult(data.result),
+    pgn: asString(data.pgn),
+    created_at: data.created_at
+  };
+}
+
+function useCollectionData<T extends { id: string }>(collectionName: string) {
+  const [state, setState] = useState<CollectionState<T>>({
+    data: [],
+    loading: true,
+    error: null
+  });
+
+  useEffect(() => {
+    const services = getFirebaseServices();
+
+    if (!services) {
+      setState({ data: [], loading: false, error: "Firebase environment variables are not configured." });
+      return undefined;
+    }
+
+    return onSnapshot(
+      collection(services.db, collectionName),
+      (snapshot) => {
+        setState({
+          data: snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as T),
+          loading: false,
+          error: null
+        });
+      },
+      (error) => {
+        setState({ data: [], loading: false, error: error.message });
+      }
+    );
+  }, [collectionName]);
+
+  return state;
+}
+
+export function useTournaments() {
+  const state = useCollectionData<DocumentData & { id: string }>("tournaments");
+
+  return {
+    ...state,
+    data: state.data
+      .map((tournament) => normalizeTournament(tournament.id, tournament))
+      .filter((tournament) => tournament.name)
+      .sort((a, b) => b.date.localeCompare(a.date))
+  };
+}
+
+export function usePlayers() {
+  const state = useCollectionData<DocumentData & { id: string }>("players");
+
+  return {
+    ...state,
+    data: state.data
+      .map((player) => normalizePlayer(player.id, player))
+      .filter((player) => player.name)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
+
+export function useMatches(tournamentId?: string) {
+  const state = useCollectionData<DocumentData & { id: string }>("matches");
+
+  return {
+    ...state,
+    data: state.data
+      .map((match) => normalizeMatch(match.id, match))
+      .filter((match) => !tournamentId || match.tournament_id === tournamentId)
+      .sort((a, b) => a.round - b.round)
+  };
+}
+
+export function useMatch(matchId: string) {
+  const [state, setState] = useState<DocumentState<Match>>({
+    data: null,
+    loading: true,
+    error: null
+  });
+
+  useEffect(() => {
+    const services = getFirebaseServices();
+
+    if (!services) {
+      setState({ data: null, loading: false, error: "Firebase environment variables are not configured." });
+      return undefined;
+    }
+
+    return onSnapshot(
+      doc(services.db, "matches", matchId),
+      (snapshot) => {
+        setState({
+          data: snapshot.exists() ? normalizeMatch(snapshot.id, snapshot.data()) : null,
+          loading: false,
+          error: null
+        });
+      },
+      (error) => {
+        setState({ data: null, loading: false, error: error.message });
+      }
+    );
+  }, [matchId]);
+
+  return state;
+}
+
+function servicesOrThrow() {
+  const services = getFirebaseServices();
+
+  if (!services) {
+    throw new Error("Firebase environment variables are not configured.");
+  }
+
+  return services;
+}
+
+export async function createTournament(input: {
+  name: string;
+  date: string;
+  rounds: number;
+  status: TournamentStatus;
+}) {
+  const { db } = servicesOrThrow();
+  await addDoc(collection(db, "tournaments"), { ...input, player_ids: [] });
+}
+
+export async function updateTournament(id: string, input: Partial<Omit<Tournament, "id">>) {
+  const { db } = servicesOrThrow();
+  await updateDoc(doc(db, "tournaments", id), input as DocumentData);
+}
+
+export async function createPlayer(input: { name: string; elo: number | null }) {
+  const { db } = servicesOrThrow();
+  await addDoc(collection(db, "players"), input);
+}
+
+export async function createPlayersBulk(inputs: Array<{ name: string; elo: number | null }>) {
+  const { db } = servicesOrThrow();
+  const batch = writeBatch(db);
+
+  for (const input of inputs) {
+    const playerRef = doc(collection(db, "players"));
+    batch.set(playerRef, input);
+  }
+
+  await batch.commit();
+}
+
+export async function updatePlayer(id: string, input: { name: string; elo: number | null }) {
+  const { db } = servicesOrThrow();
+  await updateDoc(doc(db, "players", id), input);
+}
+
+export async function addPlayerToTournament(tournamentId: string, playerId: string) {
+  const { db } = servicesOrThrow();
+  await updateDoc(doc(db, "tournaments", tournamentId), { player_ids: arrayUnion(playerId) });
+}
+
+export async function removePlayerFromTournament(tournamentId: string, playerId: string) {
+  const { db } = servicesOrThrow();
+  await updateDoc(doc(db, "tournaments", tournamentId), { player_ids: arrayRemove(playerId) });
+}
+
+export async function deleteTournamentWithMatches(tournamentId: string, matchIds: string[]) {
+  const { db } = servicesOrThrow();
+  const batch = writeBatch(db);
+
+  for (const matchId of matchIds) {
+    batch.delete(doc(db, "matches", matchId));
+  }
+
+  batch.delete(doc(db, "tournaments", tournamentId));
+  await batch.commit();
+}
+
+export async function deletePlayerAndCleanup(playerId: string, tournamentIds: string[]) {
+  const { db } = servicesOrThrow();
+  const batch = writeBatch(db);
+
+  for (const tournamentId of tournamentIds) {
+    batch.update(doc(db, "tournaments", tournamentId), { player_ids: arrayRemove(playerId) });
+  }
+
+  batch.delete(doc(db, "players", playerId));
+  await batch.commit();
+}
+
+export async function createMatch(input: {
+  tournament_id: string;
+  round: number;
+  player1_id: string;
+  player2_id: string;
+}) {
+  const { db } = servicesOrThrow();
+  await addDoc(collection(db, "matches"), {
+    ...input,
+    result: null,
+    pgn: "",
+    created_at: serverTimestamp()
+  });
+}
+
+export async function updateMatch(
+  id: string,
+  input: Partial<{
+    tournament_id: string;
+    round: number;
+    player1_id: string;
+    player2_id: string;
+    result: MatchResult;
+    pgn: string;
+  }>
+) {
+  const { db } = servicesOrThrow();
+  await updateDoc(doc(db, "matches", id), input as DocumentData);
+}
+
+export async function deleteMatch(id: string) {
+  const { db } = servicesOrThrow();
+  await deleteDoc(doc(db, "matches", id));
+}
