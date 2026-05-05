@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 
 const FRAME_COUNT = 68;
+const PRELOAD_RADIUS = 6; // load a small window around the current frame for smooth scrub
 
 function framePath(index: number) {
   return `/frames/frame_${String(index).padStart(4, "0")}.webp`;
@@ -36,52 +37,106 @@ export function HeroFrameSequence() {
     }
 
     let active = true;
-    const images: HTMLImageElement[] = [];
     const state = { frame: reducedMotion ? FRAME_COUNT - 1 : 0 };
+    const images: Array<HTMLImageElement | null> = Array.from({ length: FRAME_COUNT }, () => null);
+    const decodePromises: Array<Promise<void> | null> = Array.from({ length: FRAME_COUNT }, () => null);
+    let lastFrameDrawn = -1;
+    let drawQueued = false;
+    let cssWidth = 0;
+    let cssHeight = 0;
 
     const resize = () => {
-      const ratio = window.devicePixelRatio || 1;
-      const width = section.clientWidth;
-      const height = section.clientHeight;
-      canvas.width = width * ratio;
-      canvas.height = height * ratio;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      // High DPR canvas is expensive for scroll-scrubbed redraws; cap it.
+      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+      cssWidth = section.clientWidth;
+      cssHeight = section.clientHeight;
+      canvas.width = Math.max(1, Math.floor(cssWidth * ratio));
+      canvas.height = Math.max(1, Math.floor(cssHeight * ratio));
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      draw();
+      scheduleDraw();
     };
 
-    const draw = () => {
-      const image = images[Math.round(state.frame)];
-
-      if (!image?.complete) {
+    const ensureFrameLoaded = (frameIndex: number) => {
+      if (frameIndex < 0 || frameIndex >= FRAME_COUNT) {
+        return;
+      }
+      if (images[frameIndex]) {
         return;
       }
 
-      const width = section.clientWidth;
-      const height = section.clientHeight;
+      const image = new Image();
+      // Hint to decode off the main thread where possible.
+      (image as any).decoding = "async";
+      image.src = framePath(frameIndex + 1);
+      image.onload = () => scheduleDraw();
+      images[frameIndex] = image;
+
+      if (!decodePromises[frameIndex]) {
+        const decode = image.decode ? image.decode().then(() => undefined).catch(() => undefined) : Promise.resolve();
+        decodePromises[frameIndex] = decode;
+      }
+    };
+
+    const maybePreloadAround = (frameIndex: number) => {
+      ensureFrameLoaded(frameIndex);
+      for (let i = 1; i <= PRELOAD_RADIUS; i++) {
+        ensureFrameLoaded(frameIndex - i);
+        ensureFrameLoaded(frameIndex + i);
+      }
+    };
+
+    const draw = () => {
+      const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
+      if (frameIndex === lastFrameDrawn && !reducedMotion) {
+        return;
+      }
+      lastFrameDrawn = frameIndex;
+
+      const image = images[frameIndex];
+
+      if (!image?.complete) {
+        // If we haven't loaded this frame yet, kick off a small preload window.
+        maybePreloadAround(frameIndex);
+        return;
+      }
+
+      const width = cssWidth;
+      const height = cssHeight;
       const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
       const x = (width - image.naturalWidth * scale) / 2;
       const y = (height - image.naturalHeight * scale) / 2;
 
-      context.clearRect(0, 0, width, height);
-      context.filter = `brightness(${0.66 + (state.frame / (FRAME_COUNT - 1)) * 0.2}) blur(${reducedMotion ? 0 : 0.7}px)`;
+      context.clearRect(0, 0, cssWidth, cssHeight);
+      // Keep filter work minimal; blur in particular is expensive per-frame.
+      // Brightness provides the "assembly glow" without blowing up scroll perf.
+      const glow = 0.68 + (frameIndex / (FRAME_COUNT - 1)) * 0.18;
+      context.filter = `brightness(${glow})`;
       context.drawImage(image, x, y, image.naturalWidth * scale, image.naturalHeight * scale);
       context.filter = "none";
     };
 
-    const preload = Array.from({ length: FRAME_COUNT }, (_, index) => {
-      const image = new Image();
-      image.src = framePath(index + 1);
-      image.onload = draw;
-      images.push(image);
-      return image;
-    });
+    const scheduleDraw = () => {
+      if (drawQueued) {
+        return;
+      }
+      drawQueued = true;
+      requestAnimationFrame(() => {
+        drawQueued = false;
+        if (!active) {
+          return;
+        }
+        draw();
+      });
+    };
 
     resize();
     window.addEventListener("resize", resize);
 
     if (reducedMotion) {
+      // Ensure final frame is at least requested; we still show static content.
+      ensureFrameLoaded(FRAME_COUNT - 1);
       intro.style.opacity = "1";
       intro.style.transform = "translateY(0)";
       messaging.style.opacity = "0";
@@ -96,7 +151,12 @@ export function HeroFrameSequence() {
       return cleanup;
     }
 
-    Promise.allSettled(preload.map((image) => image.decode?.() ?? Promise.resolve())).then(async () => {
+    // Load the first frame immediately for fast paint, and start a small preload window.
+    ensureFrameLoaded(0);
+    maybePreloadAround(0);
+
+    // Give the browser a moment to paint the first frame before importing GSAP.
+    const startGsap = async () => {
       if (!active) {
         return;
       }
@@ -115,7 +175,19 @@ export function HeroFrameSequence() {
           start: "top top",
           end: "+=220%",
           scrub: 0.35,
-          pin: true
+          pin: true,
+          anticipatePin: 1,
+          invalidateOnRefresh: true,
+          onUpdate: () => {
+            const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
+            // Keep a small decode window around the current frame.
+            // Use idle callback when possible to reduce main-thread contention.
+            if ("requestIdleCallback" in window) {
+              (window as any).requestIdleCallback(() => maybePreloadAround(frameIndex), { timeout: 120 });
+            } else {
+              maybePreloadAround(frameIndex);
+            }
+          }
         }
       });
 
@@ -124,7 +196,7 @@ export function HeroFrameSequence() {
         {
           frame: FRAME_COUNT - 1,
           ease: "none",
-          onUpdate: draw,
+          onUpdate: scheduleDraw,
           duration: 1
         },
         0
@@ -178,6 +250,14 @@ export function HeroFrameSequence() {
         timeline.kill();
         window.removeEventListener("resize", resize);
       };
+    };
+
+    // Start GSAP on the next tick to let the first frame paint.
+    queueMicrotask(() => {
+      if (!active) return;
+      startGsap().catch(() => {
+        // If GSAP fails to import, we still keep the static first frame.
+      });
     });
 
     return () => cleanup();
