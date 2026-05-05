@@ -15,7 +15,8 @@ import {
   type DocumentData
 } from "firebase/firestore";
 import { getFirebaseServices } from "@/lib/firebase";
-import type { Match, MatchResult, Player, Tournament, TournamentStatus } from "@/lib/types";
+import { createDefaultStages, normalizeStages } from "@/lib/standings";
+import type { Match, MatchResult, Player, Tournament, TournamentStage, TournamentStatus } from "@/lib/types";
 
 type CollectionState<T> = {
   data: T[];
@@ -45,6 +46,16 @@ function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function asStringRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+  );
+}
+
 function asResult(value: unknown): MatchResult {
   return value === "1-0" || value === "0-1" || value === "1/2-1/2" ? value : null;
 }
@@ -53,14 +64,22 @@ function asStatus(value: unknown): TournamentStatus {
   return value === "ongoing" || value === "completed" ? value : "upcoming";
 }
 
+function inferStageId(round: number, stages: TournamentStage[]) {
+  const exact = stages.find((stage) => stage.round === round);
+  return exact?.id ?? stages[0]?.id ?? "group-stage";
+}
+
 function normalizeTournament(id: string, data: DocumentData): Tournament {
+  const rounds = asNumber(data.rounds, 1);
   return {
     id,
     name: asString(data.name),
     date: asString(data.date),
-    rounds: asNumber(data.rounds),
+    rounds,
     status: asStatus(data.status),
-    player_ids: asStringArray(data.player_ids)
+    player_ids: asStringArray(data.player_ids),
+    stages: normalizeStages(rounds, data.stages),
+    group_assignments: asStringRecord(data.group_assignments)
   };
 }
 
@@ -72,14 +91,20 @@ function normalizePlayer(id: string, data: DocumentData): Player {
   };
 }
 
-function normalizeMatch(id: string, data: DocumentData): Match {
+function normalizeMatch(id: string, data: DocumentData, tournaments: Tournament[]): Match {
+  const tournament = tournaments.find((item) => item.id === asString(data.tournament_id));
+  const fallbackStages = tournament?.stages ?? createDefaultStages(asNumber(data.round, 1));
+  const round = asNumber(data.round, 1);
+
   return {
     id,
     tournament_id: asString(data.tournament_id),
-    round: asNumber(data.round, 1),
+    round,
     player1_id: asString(data.player1_id),
     player2_id: asString(data.player2_id),
     result: asResult(data.result),
+    stage_id: asString(data.stage_id) || inferStageId(round, fallbackStages),
+    group_id: asString(data.group_id) || null,
     pgn: asString(data.pgn),
     created_at: data.created_at
   };
@@ -143,18 +168,28 @@ export function usePlayers() {
 }
 
 export function useMatches(tournamentId?: string) {
+  const tournaments = useTournaments();
   const state = useCollectionData<DocumentData & { id: string }>("matches");
 
   return {
     ...state,
+    loading: tournaments.loading || state.loading,
+    error: tournaments.error || state.error,
     data: state.data
-      .map((match) => normalizeMatch(match.id, match))
+      .map((match) => normalizeMatch(match.id, match, tournaments.data))
       .filter((match) => !tournamentId || match.tournament_id === tournamentId)
-      .sort((a, b) => a.round - b.round)
+      .sort((a, b) => {
+        if (a.round !== b.round) {
+          return a.round - b.round;
+        }
+
+        return a.created_at && b.created_at ? 0 : 0;
+      })
   };
 }
 
 export function useMatch(matchId: string) {
+  const tournaments = useTournaments();
   const [state, setState] = useState<DocumentState<Match>>({
     data: null,
     loading: true,
@@ -173,7 +208,7 @@ export function useMatch(matchId: string) {
       doc(services.db, "matches", matchId),
       (snapshot) => {
         setState({
-          data: snapshot.exists() ? normalizeMatch(snapshot.id, snapshot.data()) : null,
+          data: snapshot.exists() ? normalizeMatch(snapshot.id, snapshot.data(), tournaments.data) : null,
           loading: false,
           error: null
         });
@@ -182,9 +217,13 @@ export function useMatch(matchId: string) {
         setState({ data: null, loading: false, error: error.message });
       }
     );
-  }, [matchId]);
+  }, [matchId, tournaments.data]);
 
-  return state;
+  return {
+    ...state,
+    loading: tournaments.loading || state.loading,
+    error: tournaments.error || state.error
+  };
 }
 
 function servicesOrThrow() {
@@ -204,7 +243,12 @@ export async function createTournament(input: {
   status: TournamentStatus;
 }) {
   const { db } = servicesOrThrow();
-  await addDoc(collection(db, "tournaments"), { ...input, player_ids: [] });
+  await addDoc(collection(db, "tournaments"), {
+    ...input,
+    player_ids: [],
+    stages: createDefaultStages(input.rounds),
+    group_assignments: {}
+  });
 }
 
 export async function updateTournament(id: string, input: Partial<Omit<Tournament, "id">>) {
@@ -241,7 +285,17 @@ export async function addPlayerToTournament(tournamentId: string, playerId: stri
 
 export async function removePlayerFromTournament(tournamentId: string, playerId: string) {
   const { db } = servicesOrThrow();
-  await updateDoc(doc(db, "tournaments", tournamentId), { player_ids: arrayRemove(playerId) });
+  await updateDoc(doc(db, "tournaments", tournamentId), {
+    player_ids: arrayRemove(playerId),
+    [`group_assignments.${playerId}`]: null
+  });
+}
+
+export async function setTournamentPlayerGroup(tournamentId: string, playerId: string, groupCode: string | null) {
+  const { db } = servicesOrThrow();
+  await updateDoc(doc(db, "tournaments", tournamentId), {
+    [`group_assignments.${playerId}`]: groupCode
+  });
 }
 
 export async function deleteTournamentWithMatches(tournamentId: string, matchIds: string[]) {
@@ -261,7 +315,10 @@ export async function deletePlayerAndCleanup(playerId: string, tournamentIds: st
   const batch = writeBatch(db);
 
   for (const tournamentId of tournamentIds) {
-    batch.update(doc(db, "tournaments", tournamentId), { player_ids: arrayRemove(playerId) });
+    batch.update(doc(db, "tournaments", tournamentId), {
+      player_ids: arrayRemove(playerId),
+      [`group_assignments.${playerId}`]: null
+    });
   }
 
   batch.delete(doc(db, "players", playerId));
@@ -271,6 +328,8 @@ export async function deletePlayerAndCleanup(playerId: string, tournamentIds: st
 export async function createMatch(input: {
   tournament_id: string;
   round: number;
+  stage_id: string;
+  group_id: string | null;
   player1_id: string;
   player2_id: string;
 }) {
@@ -288,6 +347,8 @@ export async function updateMatch(
   input: Partial<{
     tournament_id: string;
     round: number;
+    stage_id: string;
+    group_id: string | null;
     player1_id: string;
     player2_id: string;
     result: MatchResult;
