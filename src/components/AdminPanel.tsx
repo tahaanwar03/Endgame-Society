@@ -85,6 +85,26 @@ export function AdminPanel() {
   const selectedTournament = tournaments.data.find((item) => item.id === selectedTournamentId) ?? null;
   const selectedMatch = matches.data.find((item) => item.id === selectedMatchId) ?? null;
   const tournamentForMatch = selectedTournament ?? tournaments.data.find((item) => item.id === selectedMatch?.tournament_id) ?? null;
+  const mobileBackAction =
+    screen === "match"
+      ? {
+          label: "Back to tournament",
+          onClick: () => {
+            if (!tournamentForMatch) {
+              setScreen("tournaments");
+              return;
+            }
+
+            setSelectedTournamentId(tournamentForMatch.id);
+            setScreen("tournament");
+          }
+        }
+      : screen === "tournament"
+        ? {
+            label: "Back to tournament library",
+            onClick: () => setScreen("tournaments")
+          }
+        : null;
 
   const renderScreen = () => {
     if (screen === "roster") {
@@ -167,10 +187,10 @@ export function AdminPanel() {
       <section className="mb-8 flex flex-col gap-4 border-l-2 border-primary pl-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Remote Firestore Control</p>
-          <h1 className="mt-2 font-serif text-4xl text-primary">Society Administration</h1>
-          <p className="mt-2 text-sm text-on-surface-variant">Signed in as {auth.user.email}</p>
+          <h1 className="mt-2 font-serif text-[2.15rem] leading-tight text-primary md:text-4xl">Society Administration</h1>
+          <p className="mt-2 text-xs text-on-surface-variant md:text-sm">Signed in as {auth.user.email}</p>
         </div>
-        <button onClick={() => logout()} className="min-h-11 border border-outline-variant px-5 text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">
+        <button onClick={() => logout()} className="min-h-11 border border-outline-variant px-5 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant md:text-xs">
           Sign out
         </button>
       </section>
@@ -190,6 +210,18 @@ export function AdminPanel() {
           onClick={() => setScreen("tournaments")}
         />
       </div>
+
+      {mobileBackAction ? (
+        <div className="mb-4 md:hidden">
+          <button
+            type="button"
+            onClick={mobileBackAction.onClick}
+            className="inline-flex min-h-11 items-center border border-neutral-700 px-4 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant"
+          >
+            {mobileBackAction.label}
+          </button>
+        </div>
+      ) : null}
 
       {error ? <p className="mb-6 border border-error-container bg-error-container/20 p-3 text-sm text-error">{error}</p> : null}
       {message ? <p className="mb-6 border border-primary/30 bg-primary/10 p-3 text-sm text-primary">{message}</p> : null}
@@ -545,7 +577,7 @@ function NavButton({ label, active, onClick }: { label: string; active: boolean;
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-11 border px-4 text-xs font-bold uppercase tracking-[0.16em] ${
+      className={`min-h-11 border px-4 text-[10px] font-bold uppercase tracking-[0.14em] md:text-xs md:tracking-[0.16em] ${
         active ? "border-primary bg-primary text-on-primary" : "border-outline-variant text-on-surface-variant"
       }`}
     >

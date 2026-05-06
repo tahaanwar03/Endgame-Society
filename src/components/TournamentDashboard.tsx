@@ -67,21 +67,27 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
   return (
     <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
       <section className="mb-8 border-l-2 border-primary pl-4">
+        <Link
+          href="/tournaments"
+          className="mb-4 inline-flex min-h-10 items-center border border-neutral-700 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant transition hover:border-primary hover:text-primary"
+        >
+          Back to tournaments
+        </Link>
         <div className="mb-3 flex items-center gap-3">
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Tournament Dashboard</p>
           <StatusBadge status={tournament.status} />
         </div>
-        <h1 className="font-serif text-4xl text-on-surface">{tournament.name}</h1>
+        <h1 className="font-serif text-[2.1rem] leading-tight text-on-surface md:text-4xl">{tournament.name}</h1>
         <p className="mt-2 text-sm text-neutral-500">{`${tournament.date || "Unscheduled"} - ${tournament.rounds} rounds`}</p>
       </section>
 
-      <div className="mb-6 flex border-b border-neutral-800">
+      <div className="sticky top-16 z-20 mb-6 flex border-b border-neutral-800 bg-[#131313]">
         {tabs.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
-            className={`min-h-12 flex-1 text-center text-xs font-bold uppercase tracking-[0.18em] ${
+            className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] md:min-h-12 md:text-xs md:tracking-[0.18em] ${
               tab === item.id ? "border-b-2 border-primary text-primary" : "text-neutral-500"
             }`}
           >
@@ -105,29 +111,31 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                 ) : group.standings.length === 0 ? (
                   <div className="p-6 text-sm text-on-surface-variant">No completed group matches yet.</div>
                 ) : (
-                  <div className="overflow-x-auto hide-scrollbar">
-                    <table className="w-full min-w-[560px] text-left text-sm">
-                      <thead className="bg-neutral-900 text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
+                  <div className="overflow-hidden">
+                    <table className="w-full table-fixed text-left text-[11px] md:text-sm">
+                      <thead className="bg-neutral-900 text-[9px] uppercase tracking-[0.12em] text-on-surface-variant md:text-[10px] md:tracking-[0.18em]">
                         <tr>
-                          <th className="px-4 py-4 text-center">Rank</th>
-                          <th className="px-4 py-4">Player</th>
-                          <th className="px-4 py-4 text-right">Pts</th>
-                          <th className="px-3 py-4 text-center">P</th>
-                          <th className="px-3 py-4 text-center">W</th>
-                          <th className="px-3 py-4 text-center">D</th>
-                          <th className="px-3 py-4 text-center">L</th>
+                          <th className="w-[13%] px-2 py-3 text-center md:px-4 md:py-4">Rk</th>
+                          <th className="w-[39%] px-2 py-3 md:px-4 md:py-4">Player</th>
+                          <th className="w-[12%] px-1 py-3 text-right md:px-4 md:py-4">Pts</th>
+                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">P</th>
+                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">W</th>
+                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">D</th>
+                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">L</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-900">
                         {group.standings.map((standing, index) => (
                           <tr key={standing.player.id} className="zebra-row">
-                            <td className="px-4 py-4 text-center font-bold text-primary">{index + 1}</td>
-                            <td className="px-4 py-4 font-semibold">{standing.player.name}</td>
-                            <td className="px-4 py-4 text-right font-bold text-primary">{standing.points}</td>
-                            <td className="px-3 py-4 text-center text-neutral-400">{standing.played}</td>
-                            <td className="px-3 py-4 text-center text-neutral-400">{standing.wins}</td>
-                            <td className="px-3 py-4 text-center text-neutral-400">{standing.draws}</td>
-                            <td className="px-3 py-4 text-center text-neutral-400">{standing.losses}</td>
+                            <td className="px-2 py-3 text-center font-bold text-primary md:px-4 md:py-4">{index + 1}</td>
+                            <td className="px-2 py-3 font-semibold leading-tight md:px-4 md:py-4">
+                              <span className="block truncate">{standing.player.name}</span>
+                            </td>
+                            <td className="px-1 py-3 text-right font-bold text-primary md:px-4 md:py-4">{standing.points}</td>
+                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.played}</td>
+                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.wins}</td>
+                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.draws}</td>
+                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.losses}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -163,12 +171,12 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                               <Link
                                 key={match.id}
                                 href={`/match/${match.id}`}
-                                className="grid grid-cols-[1fr_auto] gap-4 px-4 py-4 text-sm hover:bg-neutral-900/60"
+                                className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
                               >
-                                <span>
+                                <span className="min-w-0 truncate">
                                   {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
                                 </span>
-                                <span className="font-bold text-primary">{match.result ?? "Pending"}</span>
+                                <span className="text-xs font-bold text-primary md:text-sm">{match.result ?? "Pending"}</span>
                               </Link>
                             ))}
                           </div>
@@ -184,12 +192,12 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                       <Link
                         key={match.id}
                         href={`/match/${match.id}`}
-                        className="grid grid-cols-[1fr_auto] gap-4 px-4 py-4 text-sm hover:bg-neutral-900/60"
+                        className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
                       >
-                        <span>
+                        <span className="min-w-0 truncate">
                           {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
                         </span>
-                        <span className="font-bold text-primary">{match.result ?? "Pending"}</span>
+                        <span className="text-xs font-bold text-primary md:text-sm">{match.result ?? "Pending"}</span>
                       </Link>
                     ))}
                   </div>
