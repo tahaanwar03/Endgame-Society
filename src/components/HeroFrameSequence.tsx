@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 
 const FRAME_COUNT = 68;
 const MAX_CANVAS_DPR = 1.25;
+const MOBILE_FRAME_COUNT = 24;
 
 function framePath(index: number) {
   return `/frames/frame_${String(index).padStart(4, "0")}.webp`;
@@ -39,6 +40,16 @@ function isLowEndHeroDevice() {
   return false;
 }
 
+function buildFrameSequence(targetCount: number) {
+  if (targetCount >= FRAME_COUNT) {
+    return Array.from({ length: FRAME_COUNT }, (_, index) => index);
+  }
+
+  return Array.from({ length: targetCount }, (_, index) =>
+    Math.round((index / (targetCount - 1)) * (FRAME_COUNT - 1))
+  );
+}
+
 export function HeroFrameSequence() {
   const sectionRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -50,6 +61,7 @@ export function HeroFrameSequence() {
     let cleanup = () => {};
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const lowEndDevice = isLowEndHeroDevice();
+    const activeFrameSequence = buildFrameSequence(lowEndDevice ? MOBILE_FRAME_COUNT : FRAME_COUNT);
     const canvas = canvasRef.current;
     const section = sectionRef.current;
     const intro = introRef.current;
@@ -67,7 +79,7 @@ export function HeroFrameSequence() {
     }
 
     let active = true;
-    const state = { frame: reducedMotion ? FRAME_COUNT - 1 : 0 };
+    const state = { progress: reducedMotion ? 1 : 0 };
     const images: Array<HTMLImageElement | null> = Array.from({ length: FRAME_COUNT }, () => null);
     let decodedImages: HTMLImageElement[] = [];
     let lastFrameDrawn = -1;
@@ -88,11 +100,8 @@ export function HeroFrameSequence() {
     };
 
     const draw = () => {
-      if (lowEndDevice) {
-        return;
-      }
-
-      const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
+      const sequenceIndex = Math.max(0, Math.min(activeFrameSequence.length - 1, Math.round(state.progress * (activeFrameSequence.length - 1))));
+      const frameIndex = activeFrameSequence[sequenceIndex] ?? 0;
       if (frameIndex === lastFrameDrawn && !reducedMotion) {
         return;
       }
@@ -131,7 +140,7 @@ export function HeroFrameSequence() {
     resize();
     window.addEventListener("resize", resize);
 
-    if (reducedMotion || lowEndDevice) {
+    if (reducedMotion) {
       canvas.style.display = "none";
       intro.style.opacity = "1";
       intro.style.transform = "translateY(0)";
@@ -224,11 +233,11 @@ export function HeroFrameSequence() {
 
     const preloadAllFrames = async () => {
       const loaded = await Promise.all(
-        Array.from({ length: FRAME_COUNT }, async (_, index) => {
+        activeFrameSequence.map(async (frameIndex) => {
           const image = new Image();
-          image.src = framePath(index + 1);
+          image.src = framePath(frameIndex + 1);
           await (image.decode ? image.decode().catch(() => undefined) : Promise.resolve());
-          images[index] = image;
+          images[frameIndex] = image;
           return image;
         })
       );
@@ -253,8 +262,8 @@ export function HeroFrameSequence() {
         scrollTrigger: {
           trigger: section,
           start: "top top",
-          end: "+=220%",
-          scrub: 0.18,
+          end: lowEndDevice ? "+=180%" : "+=220%",
+          scrub: lowEndDevice ? 0.12 : 0.18,
           pin: true,
           anticipatePin: 1,
           invalidateOnRefresh: true
@@ -264,7 +273,7 @@ export function HeroFrameSequence() {
       timeline.to(
         state,
         {
-          frame: FRAME_COUNT - 1,
+          progress: 1,
           ease: "none",
           onUpdate: scheduleDraw,
           duration: 1
@@ -330,6 +339,7 @@ export function HeroFrameSequence() {
         if (!active) {
           return;
         }
+        canvas.style.display = "block";
         draw();
         await startGsap();
       } catch {
