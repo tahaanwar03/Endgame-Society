@@ -102,8 +102,8 @@ export function MatchViewer({ matchId }: { matchId: string }) {
     );
   }
 
-  const whiteName = getPlayerName(players.data, match.player1_id);
-  const blackName = getPlayerName(players.data, match.player2_id);
+  const whiteName = !match.player1_id ? "TBD" : getPlayerName(players.data, match.player1_id);
+  const blackName = !match.player2_id ? "TBD" : getPlayerName(players.data, match.player2_id);
   const movePairs = Array.from({ length: Math.ceil(parsed.moves.length / 2) }, (_, index) => ({
     number: index + 1,
     white: parsed.moves[index * 2],

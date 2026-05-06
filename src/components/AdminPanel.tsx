@@ -778,14 +778,12 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
 
 function TournamentStagesForm({ tournament, onDone }: { tournament: Tournament; onDone: (message: string) => void }) {
   const [groupCodesInput, setGroupCodesInput] = useState((getGroupStage(tournament)?.groups ?? []).join(", "));
-  const [knockoutNames, setKnockoutNames] = useState(
-    tournament.stages.filter((stage) => stage.type === "knockout").map((stage) => stage.name)
-  );
+  const [stages, setStages] = useState<TournamentStage[]>(tournament.stages);
 
   return (
     <section className="border border-neutral-800 bg-surface-container p-5">
       <h3 className="font-serif text-2xl text-on-surface">Tournament Structure</h3>
-      <p className="mt-2 text-sm text-on-surface-variant">V1 uses a single opening group stage, followed by knockout stages. Group codes and knockout names can be edited here.</p>
+      <p className="mt-2 text-sm text-on-surface-variant">V1 uses a single opening group stage, followed by knockout stages. You can rename knockout stages and add or remove them here.</p>
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -796,40 +794,70 @@ function TournamentStagesForm({ tournament, onDone }: { tournament: Tournament; 
             return;
           }
 
-          const defaultStages = createDefaultStages(tournament.rounds);
-          const nextStages = defaultStages.map((stage, index) => {
-            if (stage.type === "group") {
-              return { ...stage, groups: groupCodes };
-            }
+          const nextStages = stages.map((stage, index) => ({
+            ...stage,
+            round: index + 1,
+            groups: stage.type === "group" ? groupCodes : undefined,
+            name: stage.name.trim() || (stage.type === "group" ? "Group Stage" : `Knockout Round ${index}`)
+          }));
 
-            return {
-              ...stage,
-              name: knockoutNames[index - 1]?.trim() || stage.name
-            };
-          });
-
-          await updateTournament(tournament.id, { stages: nextStages });
+          await updateTournament(tournament.id, { stages: nextStages, rounds: nextStages.length });
           onDone("Tournament stages updated.");
         }}
         className="mt-5 space-y-4"
       >
         <TextInput label="Group codes" value={groupCodesInput} onChange={setGroupCodesInput} placeholder="A, B, C, D" />
-        <div className="grid gap-4 sm:grid-cols-2">
-          {tournament.stages
-            .filter((stage) => stage.type === "knockout")
-            .map((stage, index) => (
+        <div className="space-y-3">
+          {stages.map((stage, index) => (
+            <div key={stage.id} className="grid gap-3 border border-neutral-800 bg-surface-container-low p-4 md:grid-cols-[140px_minmax(0,1fr)_auto]">
+              <StaticMetric label="Stage" value={`Round ${index + 1}`} />
               <TextInput
-                key={stage.id}
-                label={`Knockout stage ${index + 1}`}
-                value={knockoutNames[index] ?? ""}
+                label={stage.type === "group" ? "Group stage name" : "Knockout stage name"}
+                value={stage.name}
                 onChange={(value) => {
-                  const next = [...knockoutNames];
-                  next[index] = value;
-                  setKnockoutNames(next);
+                  setStages((current) =>
+                    current.map((item) => (item.id === stage.id ? { ...item, name: value } : item))
+                  );
                 }}
               />
-            ))}
+              <div className="md:self-end">
+                {stage.type === "group" ? (
+                  <StaticMetric label="Type" value="Group" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStages((current) => current.filter((item) => item.id !== stage.id).map((item, itemIndex) => ({ ...item, round: itemIndex + 1 })));
+                    }}
+                    className="min-h-12 border border-error px-4 text-xs font-bold uppercase tracking-[0.16em] text-error"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setStages((current) => {
+              const nextRound = current.length + 1;
+              return [
+                ...current,
+                {
+                  id: slugifyStageName(`knockout-${Date.now()}`),
+                  name: `Knockout Round ${nextRound - 1}`,
+                  type: "knockout",
+                  round: nextRound
+                }
+              ];
+            });
+          }}
+          className="min-h-11 border border-outline-variant px-4 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant"
+        >
+          Add knockout stage
+        </button>
         <button className="min-h-12 border border-primary px-5 text-xs font-bold uppercase tracking-[0.16em] text-primary">
           Save structure
         </button>
@@ -1024,6 +1052,22 @@ function CreateTournamentMatchForm({
       }
     }
 
+    if (stage.type === "knockout" && !player1Id && !player2Id) {
+      await createMatch({
+        tournament_id: tournament.id,
+        round: stage.round,
+        stage_id: stage.id,
+        group_id: null,
+        player1_id: "",
+        player2_id: ""
+      });
+
+      setPlayer1Id("");
+      setPlayer2Id("");
+      onDone("Knockout placeholder created.");
+      return;
+    }
+
     if (player1Id === player2Id) {
       onDone("Choose two different players.");
       return;
@@ -1079,8 +1123,23 @@ function CreateTournamentMatchForm({
               required
             />
           ) : null}
-          <SelectInput label="White" value={player1Id} onChange={setPlayer1Id} options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))} required />
-          <SelectInput label="Black" value={player2Id} onChange={setPlayer2Id} options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))} required />
+          <SelectInput
+            label="White"
+            value={player1Id}
+            onChange={setPlayer1Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
+          <SelectInput
+            label="Black"
+            value={player2Id}
+            onChange={setPlayer2Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
+          {stage?.type === "knockout" ? (
+            <p className="text-sm text-on-surface-variant">Leave one or both player slots empty to publish a `TBD` knockout fixture during the group stage.</p>
+          ) : null}
           {stage?.type === "group" && groupId && eligiblePlayers.length < 2 ? (
             <p className="text-sm text-on-surface-variant">This group does not yet have enough assigned players to create a match.</p>
           ) : null}
@@ -1120,7 +1179,12 @@ function MatchEditorCard({
         onSubmit={async (event) => {
           event.preventDefault();
 
-          if (player1Id === player2Id) {
+          if (stage?.type === "knockout" && player1Id && player1Id === player2Id) {
+            onDone("Choose two different players.");
+            return;
+          }
+
+          if (stage?.type === "group" && player1Id === player2Id) {
             onDone("Choose two different players.");
             return;
           }
@@ -1181,8 +1245,20 @@ function MatchEditorCard({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <SelectInput label="White" value={player1Id} onChange={setPlayer1Id} options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))} required />
-          <SelectInput label="Black" value={player2Id} onChange={setPlayer2Id} options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))} required />
+          <SelectInput
+            label="White"
+            value={player1Id}
+            onChange={setPlayer1Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
+          <SelectInput
+            label="Black"
+            value={player2Id}
+            onChange={setPlayer2Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
         </div>
 
         <div>
@@ -1397,21 +1473,33 @@ function parseGroupCodes(value: string) {
 }
 
 function syncStagesToRoundCount(stages: TournamentStage[], rounds: number) {
-  const defaults = createDefaultStages(rounds);
+  const safeRounds = Math.max(1, rounds);
+  const groupStage = stages.find((stage) => stage.type === "group") ?? createDefaultStages(1)[0];
+  const knockoutStages = stages.filter((stage) => stage.type === "knockout");
 
-  return defaults.map((stage, index) => {
-    const current = stages[index];
-
-    if (!current) {
-      return stage;
+  const nextStages: TournamentStage[] = [
+    {
+      ...groupStage,
+      round: 1,
+      groups: groupStage.groups?.length ? groupStage.groups : ["A", "B", "C", "D"]
     }
+  ];
 
-    return {
-      ...stage,
-      name: current.type === "knockout" ? current.name : stage.name,
-      groups: current.type === "group" ? (current.groups?.length ? current.groups : stage.groups) : undefined
-    };
-  });
+  for (let index = 0; index < safeRounds - 1; index += 1) {
+    const existing = knockoutStages[index];
+    nextStages.push(
+      existing
+        ? { ...existing, round: index + 2 }
+        : {
+            id: `knockout-${index + 2}`,
+            name: `Knockout Round ${index + 1}`,
+            type: "knockout",
+            round: index + 2
+          }
+    );
+  }
+
+  return nextStages;
 }
 
 function getStageName(tournament: Tournament, stageId: string) {

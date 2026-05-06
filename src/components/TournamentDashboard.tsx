@@ -166,7 +166,7 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                                 className="grid grid-cols-[1fr_auto] gap-4 px-4 py-4 text-sm hover:bg-neutral-900/60"
                               >
                                 <span>
-                                  {getPlayerName(players.data, match.player1_id)} vs {getPlayerName(players.data, match.player2_id)}
+                                  {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
                                 </span>
                                 <span className="font-bold text-primary">{match.result ?? "Pending"}</span>
                               </Link>
@@ -187,7 +187,7 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                         className="grid grid-cols-[1fr_auto] gap-4 px-4 py-4 text-sm hover:bg-neutral-900/60"
                       >
                         <span>
-                          {getPlayerName(players.data, match.player1_id)} vs {getPlayerName(players.data, match.player2_id)}
+                          {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
                         </span>
                         <span className="font-bold text-primary">{match.result ?? "Pending"}</span>
                       </Link>
@@ -247,4 +247,13 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
       ) : null}
     </main>
   );
+}
+
+function formatFixturePlayerName(playerId: string, players: Parameters<typeof getPlayerName>[0]) {
+  if (!playerId) {
+    return "TBD";
+  }
+
+  const name = getPlayerName(players, playerId);
+  return name === "Unknown player" ? "TBD" : name;
 }
