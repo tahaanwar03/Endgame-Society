@@ -400,6 +400,20 @@ function TournamentDetailScreen({
     stage,
     matches: matches.filter((match) => match.stage_id === stage.id)
   }));
+  const [openMobileSections, setOpenMobileSections] = useState<Record<string, boolean>>({
+    settings: true,
+    structure: false,
+    roster: true,
+    createMatch: false,
+    matches: true
+  });
+
+  function toggleMobileSection(sectionId: keyof typeof openMobileSections) {
+    setOpenMobileSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId]
+    }));
+  }
 
   return (
     <section className="space-y-6">
@@ -437,67 +451,166 @@ function TournamentDetailScreen({
         </div>
       </section>
 
-      <TournamentSettingsForm tournament={tournament} onDone={onDone} />
-      <TournamentStagesForm tournament={tournament} onDone={onDone} />
+      <MobileAccordionSection
+        title="Tournament Settings"
+        open={openMobileSections.settings}
+        onToggle={() => toggleMobileSection("settings")}
+      >
+        <TournamentSettingsForm tournament={tournament} onDone={onDone} compact />
+      </MobileAccordionSection>
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <TournamentRosterSection
-          tournament={tournament}
-          rosterPlayers={rosterPlayers}
-          groupedRoster={groupedRoster}
-          availablePlayers={unassignedPlayers}
-          onDone={onDone}
-        />
-        <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} />
-      </section>
+      <MobileAccordionSection
+        title="Tournament Structure"
+        open={openMobileSections.structure}
+        onToggle={() => toggleMobileSection("structure")}
+      >
+        <TournamentStagesForm tournament={tournament} onDone={onDone} compact />
+      </MobileAccordionSection>
 
-      <section className="border border-neutral-800 bg-surface-container p-5">
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
-          <h3 className="font-serif text-2xl text-on-surface">Matches</h3>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{matches.length} total</p>
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <MobileAccordionSection
+          title="Tournament Roster"
+          open={openMobileSections.roster}
+          onToggle={() => toggleMobileSection("roster")}
+          className="xl:hidden"
+        >
+          <TournamentRosterSection
+            tournament={tournament}
+            rosterPlayers={rosterPlayers}
+            groupedRoster={groupedRoster}
+            availablePlayers={unassignedPlayers}
+            onDone={onDone}
+            compact
+          />
+        </MobileAccordionSection>
+        <div className="hidden xl:block">
+          <TournamentRosterSection
+            tournament={tournament}
+            rosterPlayers={rosterPlayers}
+            groupedRoster={groupedRoster}
+            availablePlayers={unassignedPlayers}
+            onDone={onDone}
+          />
         </div>
-        {matches.length === 0 ? (
-          <p className="pt-5 text-sm text-on-surface-variant">No matches created yet. Define groups, assign players, then create fixtures by stage.</p>
-        ) : (
-          <div className="mt-5 space-y-5">
-            {stageMatches.map(({ stage, matches: stageItems }) => (
-              <div key={stage.id}>
-                <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">{stage.name}</p>
-                {stage.type === "group" ? (
-                  <div className="space-y-4">
-                    {(stage.groups ?? []).map((groupCode) => {
-                      const groupMatches = stageItems.filter((match) => match.group_id === groupCode);
 
-                      return (
-                        <div key={groupCode}>
-                          <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-primary">Group {groupCode}</p>
-                          {groupMatches.length === 0 ? (
-                            <p className="text-sm text-on-surface-variant">No matches yet.</p>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {groupMatches.map((match) => (
-                                <MatchChip key={match.id} match={match} players={players} onOpenMatch={onOpenMatch} />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : stageItems.length === 0 ? (
-                  <p className="text-sm text-on-surface-variant">No matches yet.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {stageItems.map((match) => (
-                      <MatchChip key={match.id} match={match} players={players} onOpenMatch={onOpenMatch} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+        <MobileAccordionSection
+          title="Add Match"
+          open={openMobileSections.createMatch}
+          onToggle={() => toggleMobileSection("createMatch")}
+          className="xl:hidden"
+        >
+          <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} compact />
+        </MobileAccordionSection>
+        <div className="hidden xl:block">
+          <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} />
+        </div>
+      </div>
+
+      <MobileAccordionSection
+        title={`Matches (${matches.length})`}
+        open={openMobileSections.matches}
+        onToggle={() => toggleMobileSection("matches")}
+        className="xl:hidden"
+      >
+        <TournamentMatchSections matches={matches} players={players} stageMatches={stageMatches} onOpenMatch={onOpenMatch} compact />
+      </MobileAccordionSection>
+      <TournamentMatchSections matches={matches} players={players} stageMatches={stageMatches} onOpenMatch={onOpenMatch} className="hidden xl:block" />
+    </section>
+  );
+}
+
+function MobileAccordionSection({
+  title,
+  open,
+  onToggle,
+  children,
+  className = ""
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={className}>
+      <div className="border border-neutral-800 bg-surface-container">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-h-14 w-full items-center justify-between gap-4 px-4 text-left"
+        >
+          <span className="font-serif text-2xl text-on-surface">{title}</span>
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">{open ? "Close" : "Open"}</span>
+        </button>
+        {open ? <div className="border-t border-neutral-800">{children}</div> : null}
+      </div>
+    </section>
+  );
+}
+
+function TournamentMatchSections({
+  matches,
+  players,
+  stageMatches,
+  onOpenMatch,
+  compact,
+  className = ""
+}: {
+  matches: Match[];
+  players: Player[];
+  stageMatches: Array<{ stage: TournamentStage; matches: Match[] }>;
+  onOpenMatch: (matchId: string) => void;
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <section className={`border border-neutral-800 bg-surface-container p-5 ${className}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
+        <h3 className="font-serif text-2xl text-on-surface">Matches</h3>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{matches.length} total</p>
+      </div>
+      {matches.length === 0 ? (
+        <p className="pt-5 text-sm text-on-surface-variant">No matches created yet. Define groups, assign players, then create fixtures by stage.</p>
+      ) : (
+        <div className="mt-5 space-y-5">
+          {stageMatches.map(({ stage, matches: stageItems }) => (
+            <div key={stage.id}>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">{stage.name}</p>
+              {stage.type === "group" ? (
+                <div className="space-y-4">
+                  {(stage.groups ?? []).map((groupCode) => {
+                    const groupMatches = stageItems.filter((match) => match.group_id === groupCode);
+
+                    return (
+                      <div key={groupCode}>
+                        <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-primary">Group {groupCode}</p>
+                        {groupMatches.length === 0 ? (
+                          <p className="text-sm text-on-surface-variant">No matches yet.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {groupMatches.map((match) => (
+                              <MatchChip key={match.id} match={match} players={players} onOpenMatch={onOpenMatch} compact={compact} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : stageItems.length === 0 ? (
+                <p className="text-sm text-on-surface-variant">No matches yet.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {stageItems.map((match) => (
+                    <MatchChip key={match.id} match={match} players={players} onOpenMatch={onOpenMatch} compact={compact} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -589,22 +702,26 @@ function NavButton({ label, active, onClick }: { label: string; active: boolean;
 function MatchChip({
   match,
   players,
-  onOpenMatch
+  onOpenMatch,
+  compact
 }: {
   match: Match;
   players: Player[];
   onOpenMatch: (matchId: string) => void;
+  compact?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={() => onOpenMatch(match.id)}
-      className="min-h-11 border border-outline-variant bg-surface-container-low px-4 py-3 text-left text-sm transition hover:border-primary hover:text-primary"
+      className={`border border-outline-variant bg-surface-container-low text-left transition hover:border-primary hover:text-primary ${
+        compact ? "min-h-10 px-3 py-2 text-xs" : "min-h-11 px-4 py-3 text-sm"
+      }`}
     >
       <span className="block font-semibold">
         {getPlayerName(players, match.player1_id)} vs {getPlayerName(players, match.player2_id)}
       </span>
-      <span className="mt-1 block text-xs uppercase tracking-[0.14em] text-on-surface-variant">{match.result ?? "Pending"}</span>
+      <span className={`mt-1 block uppercase tracking-[0.14em] text-on-surface-variant ${compact ? "text-[10px]" : "text-xs"}`}>{match.result ?? "Pending"}</span>
     </button>
   );
 }
@@ -773,15 +890,23 @@ function PlayerEditorRow({
   );
 }
 
-function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament; onDone: (message: string) => void }) {
+function TournamentSettingsForm({
+  tournament,
+  onDone,
+  compact
+}: {
+  tournament: Tournament;
+  onDone: (message: string) => void;
+  compact?: boolean;
+}) {
   const [name, setName] = useState(tournament.name);
   const [date, setDate] = useState(tournament.date);
   const [rounds, setRounds] = useState(tournament.rounds);
   const [status, setStatus] = useState<TournamentStatus>(tournament.status);
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
-      <h3 className="font-serif text-2xl text-on-surface">Tournament Settings</h3>
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
+      {compact ? null : <h3 className="font-serif text-2xl text-on-surface">Tournament Settings</h3>}
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -794,7 +919,7 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
           });
           onDone("Tournament updated.");
         }}
-        className="mt-5 grid gap-4 sm:grid-cols-2"
+        className={`${compact ? "" : "mt-5 "}grid gap-4 sm:grid-cols-2`}
       >
         <TextInput label="Name" value={name} onChange={setName} required className="sm:col-span-2" />
         <TextInput label="Date" value={date} onChange={setDate} type="date" required />
@@ -808,14 +933,22 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
   );
 }
 
-function TournamentStagesForm({ tournament, onDone }: { tournament: Tournament; onDone: (message: string) => void }) {
+function TournamentStagesForm({
+  tournament,
+  onDone,
+  compact
+}: {
+  tournament: Tournament;
+  onDone: (message: string) => void;
+  compact?: boolean;
+}) {
   const [groupCodesInput, setGroupCodesInput] = useState((getGroupStage(tournament)?.groups ?? []).join(", "));
   const [stages, setStages] = useState<TournamentStage[]>(tournament.stages);
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
-      <h3 className="font-serif text-2xl text-on-surface">Tournament Structure</h3>
-      <p className="mt-2 text-sm text-on-surface-variant">V1 uses a single opening group stage, followed by knockout stages. You can rename knockout stages and add or remove them here.</p>
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
+      {compact ? null : <h3 className="font-serif text-2xl text-on-surface">Tournament Structure</h3>}
+      <p className={`${compact ? "" : "mt-2 "}text-sm text-on-surface-variant`}>V1 uses a single opening group stage, followed by knockout stages. You can rename knockout stages and add or remove them here.</p>
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -836,7 +969,7 @@ function TournamentStagesForm({ tournament, onDone }: { tournament: Tournament; 
           await updateTournament(tournament.id, { stages: nextStages, rounds: nextStages.length });
           onDone("Tournament stages updated.");
         }}
-        className="mt-5 space-y-4"
+        className={`${compact ? "mt-4" : "mt-5"} space-y-4`}
       >
         <TextInput label="Group codes" value={groupCodesInput} onChange={setGroupCodesInput} placeholder="A, B, C, D" />
         <div className="space-y-3">
@@ -903,20 +1036,22 @@ function TournamentRosterSection({
   rosterPlayers,
   groupedRoster,
   availablePlayers,
-  onDone
+  onDone,
+  compact
 }: {
   tournament: Tournament;
   rosterPlayers: Player[];
   groupedRoster: ReturnType<typeof getTournamentPlayersByGroup>;
   availablePlayers: Player[];
   onDone: (message: string) => void;
+  compact?: boolean;
 }) {
   const [playerIdToAdd, setPlayerIdToAdd] = useState("");
   const groupStage = getGroupStage(tournament);
   const groupCodes = groupStage?.groups ?? [];
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
       <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
         <h3 className="font-serif text-2xl text-on-surface">Tournament Roster</h3>
         <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{rosterPlayers.length} assigned</p>
@@ -1038,11 +1173,13 @@ function PlayerGroupRow({
 function CreateTournamentMatchForm({
   tournament,
   rosterPlayers,
-  onDone
+  onDone,
+  compact
 }: {
   tournament: Tournament;
   rosterPlayers: Player[];
   onDone: (message: string) => void;
+  compact?: boolean;
 }) {
   const [stageId, setStageId] = useState(tournament.stages[0]?.id ?? "");
   const [groupId, setGroupId] = useState("");
@@ -1120,7 +1257,7 @@ function CreateTournamentMatchForm({
   }
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
       <div className="border-b border-neutral-800 pb-4">
         <h3 className="font-serif text-2xl text-on-surface">Add Match</h3>
         <p className="mt-2 text-sm text-on-surface-variant">Group-stage pairings are locked to the selected group. Knockout stages accept any rostered players.</p>

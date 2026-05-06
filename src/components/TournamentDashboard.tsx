@@ -63,6 +63,14 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
   const stageSections = groupMatchesByStage(tournament, matches.data);
   const rosterGroups = getTournamentPlayersByGroup(tournament, players.data);
   const standingsByGroup = buildStandingsByGroup(tournament, players.data, matches.data);
+  const totalRosteredPlayers = Array.from(rosterGroups.grouped.values()).reduce((sum, group) => sum + group.length, 0) + rosterGroups.unassigned.length;
+  const totalGroups = Array.from(rosterGroups.grouped.keys()).length;
+  const currentStageName =
+    stageSections.find((section) =>
+      isGroupStageSection(section)
+        ? section.groupSections.some((groupSection) => groupSection.matches.length > 0)
+        : section.matches.length > 0
+    )?.stage.name ?? tournament.stages[0]?.name ?? "Group Stage";
 
   return (
     <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
@@ -79,6 +87,11 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
         </div>
         <h1 className="font-serif text-[2.1rem] leading-tight text-on-surface md:text-4xl">{tournament.name}</h1>
         <p className="mt-2 text-sm text-neutral-500">{`${tournament.date || "Unscheduled"} - ${tournament.rounds} rounds`}</p>
+        <div className="mt-4 grid grid-cols-3 gap-2 md:hidden">
+          <SummaryChip label="Players" value={String(totalRosteredPlayers)} />
+          <SummaryChip label="Groups" value={String(totalGroups)} />
+          <SummaryChip label="Stage" value={currentStageName} />
+        </div>
       </section>
 
       <div className="sticky top-16 z-20 mb-6 flex border-b border-neutral-800 bg-[#131313]">
@@ -264,4 +277,13 @@ function formatFixturePlayerName(playerId: string, players: Parameters<typeof ge
 
   const name = getPlayerName(players, playerId);
   return name === "Unknown player" ? "TBD" : name;
+}
+
+function SummaryChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-neutral-800 bg-surface-container-low px-3 py-3">
+      <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-on-surface-variant">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold text-on-surface">{value}</p>
+    </div>
+  );
 }
