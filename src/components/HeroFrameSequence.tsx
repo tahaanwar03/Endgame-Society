@@ -4,50 +4,10 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 
 const FRAME_COUNT = 68;
-const MAX_CANVAS_DPR = 1.25;
-const MOBILE_FRAME_COUNT = 24;
+const PRELOAD_RADIUS = 6; // load a small window around the current frame for smooth scrub
 
 function framePath(index: number) {
   return `/frames/frame_${String(index).padStart(4, "0")}.webp`;
-}
-
-function isLowEndHeroDevice() {
-  const nav = navigator as Navigator & {
-    deviceMemory?: number;
-    connection?: { saveData?: boolean; effectiveType?: string };
-  };
-
-  if (window.innerWidth < 900) {
-    return true;
-  }
-
-  if (nav.deviceMemory && nav.deviceMemory <= 4) {
-    return true;
-  }
-
-  if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) {
-    return true;
-  }
-
-  if (nav.connection?.saveData) {
-    return true;
-  }
-
-  if (nav.connection?.effectiveType && ["slow-2g", "2g", "3g"].includes(nav.connection.effectiveType)) {
-    return true;
-  }
-
-  return false;
-}
-
-function buildFrameSequence(targetCount: number) {
-  if (targetCount >= FRAME_COUNT) {
-    return Array.from({ length: FRAME_COUNT }, (_, index) => index);
-  }
-
-  return Array.from({ length: targetCount }, (_, index) =>
-    Math.round((index / (targetCount - 1)) * (FRAME_COUNT - 1))
-  );
 }
 
 export function HeroFrameSequence() {
@@ -60,8 +20,6 @@ export function HeroFrameSequence() {
   useEffect(() => {
     let cleanup = () => {};
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const lowEndDevice = isLowEndHeroDevice();
-    const activeFrameSequence = buildFrameSequence(lowEndDevice ? MOBILE_FRAME_COUNT : FRAME_COUNT);
     const canvas = canvasRef.current;
     const section = sectionRef.current;
     const intro = introRef.current;
@@ -79,16 +37,17 @@ export function HeroFrameSequence() {
     }
 
     let active = true;
-    const state = { progress: reducedMotion ? 1 : 0 };
+    const state = { frame: reducedMotion ? FRAME_COUNT - 1 : 0 };
     const images: Array<HTMLImageElement | null> = Array.from({ length: FRAME_COUNT }, () => null);
-    let decodedImages: HTMLImageElement[] = [];
+    const decodePromises: Array<Promise<void> | null> = Array.from({ length: FRAME_COUNT }, () => null);
     let lastFrameDrawn = -1;
     let drawQueued = false;
     let cssWidth = 0;
     let cssHeight = 0;
 
     const resize = () => {
-      const ratio = Math.min(window.devicePixelRatio || 1, MAX_CANVAS_DPR);
+      // High DPR canvas is expensive for scroll-scrubbed redraws; cap it.
+      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
       cssWidth = section.clientWidth;
       cssHeight = section.clientHeight;
       canvas.width = Math.max(1, Math.floor(cssWidth * ratio));
@@ -99,17 +58,47 @@ export function HeroFrameSequence() {
       scheduleDraw();
     };
 
+    const ensureFrameLoaded = (frameIndex: number) => {
+      if (frameIndex < 0 || frameIndex >= FRAME_COUNT) {
+        return;
+      }
+      if (images[frameIndex]) {
+        return;
+      }
+
+      const image = new Image();
+      // Hint to decode off the main thread where possible.
+      (image as any).decoding = "async";
+      image.src = framePath(frameIndex + 1);
+      image.onload = () => scheduleDraw();
+      images[frameIndex] = image;
+
+      if (!decodePromises[frameIndex]) {
+        const decode = image.decode ? image.decode().then(() => undefined).catch(() => undefined) : Promise.resolve();
+        decodePromises[frameIndex] = decode;
+      }
+    };
+
+    const maybePreloadAround = (frameIndex: number) => {
+      ensureFrameLoaded(frameIndex);
+      for (let i = 1; i <= PRELOAD_RADIUS; i++) {
+        ensureFrameLoaded(frameIndex - i);
+        ensureFrameLoaded(frameIndex + i);
+      }
+    };
+
     const draw = () => {
-      const sequenceIndex = Math.max(0, Math.min(activeFrameSequence.length - 1, Math.round(state.progress * (activeFrameSequence.length - 1))));
-      const frameIndex = activeFrameSequence[sequenceIndex] ?? 0;
+      const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
       if (frameIndex === lastFrameDrawn && !reducedMotion) {
         return;
       }
       lastFrameDrawn = frameIndex;
 
-      const image = decodedImages[frameIndex];
+      const image = images[frameIndex];
 
       if (!image?.complete) {
+        // If we haven't loaded this frame yet, kick off a small preload window.
+        maybePreloadAround(frameIndex);
         return;
       }
 
@@ -120,7 +109,12 @@ export function HeroFrameSequence() {
       const y = (height - image.naturalHeight * scale) / 2;
 
       context.clearRect(0, 0, cssWidth, cssHeight);
+      // Keep filter work minimal; blur in particular is expensive per-frame.
+      // Brightness provides the "assembly glow" without blowing up scroll perf.
+      const glow = 0.68 + (frameIndex / (FRAME_COUNT - 1)) * 0.18;
+      context.filter = `brightness(${glow})`;
       context.drawImage(image, x, y, image.naturalWidth * scale, image.naturalHeight * scale);
+      context.filter = "none";
     };
 
     const scheduleDraw = () => {
@@ -141,110 +135,27 @@ export function HeroFrameSequence() {
     window.addEventListener("resize", resize);
 
     if (reducedMotion) {
-      canvas.style.display = "none";
+      // Ensure final frame is at least requested; we still show static content.
+      ensureFrameLoaded(FRAME_COUNT - 1);
       intro.style.opacity = "1";
       intro.style.transform = "translateY(0)";
       messaging.style.opacity = "0";
       footer.style.opacity = "1";
       footer.style.transform = "translateY(0)";
 
-      const startStaticGsap = async () => {
-        if (!active) {
-          return;
-        }
-
-        const gsap = (await import("gsap")).default;
-        const { ScrollTrigger } = await import("gsap/ScrollTrigger");
-        gsap.registerPlugin(ScrollTrigger);
-
-        gsap.set(intro, { opacity: 1, y: 0 });
-        gsap.set(messaging, { opacity: 0, y: 32 });
-        gsap.set(footer, { opacity: 0, y: 28 });
-
-        const timeline = gsap.timeline({
-          scrollTrigger: {
-            trigger: section,
-            start: "top top",
-            end: "+=180%",
-            scrub: 0.2,
-            pin: true,
-            anticipatePin: 1,
-            invalidateOnRefresh: true
-          }
-        });
-
-        timeline
-          .to(
-            intro,
-            {
-              opacity: 0,
-              y: -28,
-              ease: "power2.out",
-              duration: 0.18
-            },
-            0.12
-          )
-          .to(
-            messaging,
-            {
-              opacity: 1,
-              y: 0,
-              ease: "power2.out",
-              duration: 0.18
-            },
-            0.26
-          )
-          .to(
-            messaging,
-            {
-              opacity: 0,
-              y: -20,
-              ease: "power2.out",
-              duration: 0.16
-            },
-            0.58
-          )
-          .to(
-            footer,
-            {
-              opacity: 1,
-              y: 0,
-              ease: "power2.out",
-              duration: 0.18
-            },
-            0.76
-          );
-
-        cleanup = () => {
-          active = false;
-          timeline.scrollTrigger?.kill();
-          timeline.kill();
-          window.removeEventListener("resize", resize);
-        };
+      cleanup = () => {
+        active = false;
+        window.removeEventListener("resize", resize);
       };
 
-      queueMicrotask(() => {
-        if (!active) return;
-        startStaticGsap().catch(() => {});
-      });
-
-      return () => cleanup();
+      return cleanup;
     }
 
-    const preloadAllFrames = async () => {
-      const loaded = await Promise.all(
-        activeFrameSequence.map(async (frameIndex) => {
-          const image = new Image();
-          image.src = framePath(frameIndex + 1);
-          await (image.decode ? image.decode().catch(() => undefined) : Promise.resolve());
-          images[frameIndex] = image;
-          return image;
-        })
-      );
+    // Load the first frame immediately for fast paint, and start a small preload window.
+    ensureFrameLoaded(0);
+    maybePreloadAround(0);
 
-      return loaded;
-    };
-
+    // Give the browser a moment to paint the first frame before importing GSAP.
     const startGsap = async () => {
       if (!active) {
         return;
@@ -262,18 +173,28 @@ export function HeroFrameSequence() {
         scrollTrigger: {
           trigger: section,
           start: "top top",
-          end: lowEndDevice ? "+=180%" : "+=220%",
-          scrub: lowEndDevice ? 0.12 : 0.18,
+          end: "+=220%",
+          scrub: 0.35,
           pin: true,
           anticipatePin: 1,
-          invalidateOnRefresh: true
+          invalidateOnRefresh: true,
+          onUpdate: () => {
+            const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
+            // Keep a small decode window around the current frame.
+            // Use idle callback when possible to reduce main-thread contention.
+            if ("requestIdleCallback" in window) {
+              (window as any).requestIdleCallback(() => maybePreloadAround(frameIndex), { timeout: 120 });
+            } else {
+              maybePreloadAround(frameIndex);
+            }
+          }
         }
       });
 
       timeline.to(
         state,
         {
-          progress: 1,
+          frame: FRAME_COUNT - 1,
           ease: "none",
           onUpdate: scheduleDraw,
           duration: 1
@@ -331,20 +252,12 @@ export function HeroFrameSequence() {
       };
     };
 
-    queueMicrotask(async () => {
+    // Start GSAP on the next tick to let the first frame paint.
+    queueMicrotask(() => {
       if (!active) return;
-
-      try {
-        decodedImages = await preloadAllFrames();
-        if (!active) {
-          return;
-        }
-        canvas.style.display = "block";
-        draw();
-        await startGsap();
-      } catch {
-        canvas.style.display = "none";
-      }
+      startGsap().catch(() => {
+        // If GSAP fails to import, we still keep the static first frame.
+      });
     });
 
     return () => cleanup();

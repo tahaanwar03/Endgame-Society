@@ -451,29 +451,16 @@ function TournamentDetailScreen({
         </div>
       </section>
 
-      <MobileAccordionSection
-        title="Tournament Settings"
-        open={openMobileSections.settings}
-        onToggle={() => toggleMobileSection("settings")}
-      >
+      <MobileAccordionSection title="Tournament Settings" open={openMobileSections.settings} onToggle={() => toggleMobileSection("settings")}>
         <TournamentSettingsForm tournament={tournament} onDone={onDone} compact />
       </MobileAccordionSection>
 
-      <MobileAccordionSection
-        title="Tournament Structure"
-        open={openMobileSections.structure}
-        onToggle={() => toggleMobileSection("structure")}
-      >
+      <MobileAccordionSection title="Tournament Structure" open={openMobileSections.structure} onToggle={() => toggleMobileSection("structure")}>
         <TournamentStagesForm tournament={tournament} onDone={onDone} compact />
       </MobileAccordionSection>
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <MobileAccordionSection
-          title="Tournament Roster"
-          open={openMobileSections.roster}
-          onToggle={() => toggleMobileSection("roster")}
-          className="xl:hidden"
-        >
+        <MobileAccordionSection title="Tournament Roster" open={openMobileSections.roster} onToggle={() => toggleMobileSection("roster")} className="xl:hidden">
           <TournamentRosterSection
             tournament={tournament}
             rosterPlayers={rosterPlayers}
@@ -493,12 +480,7 @@ function TournamentDetailScreen({
           />
         </div>
 
-        <MobileAccordionSection
-          title="Add Match"
-          open={openMobileSections.createMatch}
-          onToggle={() => toggleMobileSection("createMatch")}
-          className="xl:hidden"
-        >
+        <MobileAccordionSection title="Add Match" open={openMobileSections.createMatch} onToggle={() => toggleMobileSection("createMatch")} className="xl:hidden">
           <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} compact />
         </MobileAccordionSection>
         <div className="hidden xl:block">
@@ -506,12 +488,7 @@ function TournamentDetailScreen({
         </div>
       </div>
 
-      <MobileAccordionSection
-        title={`Matches (${matches.length})`}
-        open={openMobileSections.matches}
-        onToggle={() => toggleMobileSection("matches")}
-        className="xl:hidden"
-      >
+      <MobileAccordionSection title={`Matches (${matches.length})`} open={openMobileSections.matches} onToggle={() => toggleMobileSection("matches")} className="xl:hidden">
         <TournamentMatchSections matches={matches} players={players} stageMatches={stageMatches} onOpenMatch={onOpenMatch} compact />
       </MobileAccordionSection>
       <TournamentMatchSections matches={matches} players={players} stageMatches={stageMatches} onOpenMatch={onOpenMatch} className="hidden xl:block" />
@@ -535,11 +512,7 @@ function MobileAccordionSection({
   return (
     <section className={className}>
       <div className="border border-neutral-800 bg-surface-container">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-h-14 w-full items-center justify-between gap-4 px-4 text-left"
-        >
+        <button type="button" onClick={onToggle} className="flex min-h-14 w-full items-center justify-between gap-4 px-4 text-left">
           <span className="font-serif text-2xl text-on-surface">{title}</span>
           <span className="text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">{open ? "Close" : "Open"}</span>
         </button>
