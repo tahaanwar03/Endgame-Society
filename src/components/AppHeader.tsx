@@ -21,10 +21,11 @@ export function AppHeader() {
           <Image
             src="/brand/logo-square.png"
             alt=""
-            width={32}
-            height={32}
+            width={28}
+            height={28}
             priority={false}
-            className="h-8 w-8 rounded-sm border border-neutral-800 bg-neutral-950"
+            sizes="28px"
+            className="h-7 w-7 rounded-sm border border-neutral-800 bg-neutral-950 md:h-8 md:w-8"
           />
           <span>The Endgame Society</span>
         </Link>
