@@ -2,6 +2,16 @@ export type TournamentStatus = "upcoming" | "ongoing" | "completed";
 
 export type MatchResult = "1-0" | "0-1" | "1/2-1/2" | null;
 
+export type TournamentStageType = "group" | "knockout";
+
+export type TournamentStage = {
+  id: string;
+  name: string;
+  type: TournamentStageType;
+  round: number;
+  groups?: string[];
+};
+
 export type Tournament = {
   id: string;
   name: string;
@@ -9,6 +19,8 @@ export type Tournament = {
   rounds: number;
   status: TournamentStatus;
   player_ids: string[];
+  stages: TournamentStage[];
+  group_assignments: Record<string, string>;
 };
 
 export type Player = {
@@ -24,6 +36,8 @@ export type Match = {
   player1_id: string;
   player2_id: string;
   result: MatchResult;
+  stage_id: string;
+  group_id: string | null;
   pgn?: string;
   created_at?: unknown;
 };

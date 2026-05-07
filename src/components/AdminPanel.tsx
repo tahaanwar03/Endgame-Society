@@ -13,6 +13,7 @@ import {
   deletePlayerAndCleanup,
   deleteTournamentWithMatches,
   removePlayerFromTournament,
+  setTournamentPlayerGroup,
   updateMatch,
   updatePlayer,
   updateTournament,
@@ -20,12 +21,28 @@ import {
   usePlayers,
   useTournaments
 } from "@/lib/firestore-hooks";
-import { getPlayerName } from "@/lib/standings";
-import type { Match, MatchResult, Player, Tournament, TournamentStatus } from "@/lib/types";
+import {
+  createDefaultStages,
+  getGroupStage,
+  getPlayerName,
+  getTournamentPlayersByGroup,
+  slugifyStageName
+} from "@/lib/standings";
+import type {
+  Match,
+  MatchResult,
+  Player,
+  Tournament,
+  TournamentStage,
+  TournamentStageType,
+  TournamentStatus
+} from "@/lib/types";
 
 const statuses: TournamentStatus[] = ["upcoming", "ongoing", "completed"];
 const results: MatchResult[] = ["1-0", "0-1", "1/2-1/2", null];
+const rosterSortModes = ["A-Z", "ELO high to low", "ELO low to high"] as const;
 
+type RosterSortMode = (typeof rosterSortModes)[number];
 type AdminScreen = "roster" | "tournaments" | "tournament" | "match";
 
 export function AdminPanel() {
@@ -68,6 +85,26 @@ export function AdminPanel() {
   const selectedTournament = tournaments.data.find((item) => item.id === selectedTournamentId) ?? null;
   const selectedMatch = matches.data.find((item) => item.id === selectedMatchId) ?? null;
   const tournamentForMatch = selectedTournament ?? tournaments.data.find((item) => item.id === selectedMatch?.tournament_id) ?? null;
+  const mobileBackAction =
+    screen === "match"
+      ? {
+          label: "Back to tournament",
+          onClick: () => {
+            if (!tournamentForMatch) {
+              setScreen("tournaments");
+              return;
+            }
+
+            setSelectedTournamentId(tournamentForMatch.id);
+            setScreen("tournament");
+          }
+        }
+      : screen === "tournament"
+        ? {
+            label: "Back to tournament library",
+            onClick: () => setScreen("tournaments")
+          }
+        : null;
 
   const renderScreen = () => {
     if (screen === "roster") {
@@ -93,7 +130,7 @@ export function AdminPanel() {
         return (
           <EmptyAdminState
             title="Tournament not found"
-            detail="Choose a tournament from the library to manage its roster and matches."
+            detail="Choose a tournament from the library to manage its groups, roster, and matches."
             actionLabel="Back to tournament library"
             onAction={() => setScreen("tournaments")}
           />
@@ -150,10 +187,10 @@ export function AdminPanel() {
       <section className="mb-8 flex flex-col gap-4 border-l-2 border-primary pl-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Remote Firestore Control</p>
-          <h1 className="mt-2 font-serif text-4xl text-primary">Society Administration</h1>
-          <p className="mt-2 text-sm text-on-surface-variant">Signed in as {auth.user.email}</p>
+          <h1 className="mt-2 font-serif text-[2.15rem] leading-tight text-primary md:text-4xl">Society Administration</h1>
+          <p className="mt-2 text-xs text-on-surface-variant md:text-sm">Signed in as {auth.user.email}</p>
         </div>
-        <button onClick={() => logout()} className="min-h-11 border border-outline-variant px-5 text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">
+        <button onClick={() => logout()} className="min-h-11 border border-outline-variant px-5 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant md:text-xs">
           Sign out
         </button>
       </section>
@@ -174,6 +211,18 @@ export function AdminPanel() {
         />
       </div>
 
+      {mobileBackAction ? (
+        <div className="mb-4 md:hidden">
+          <button
+            type="button"
+            onClick={mobileBackAction.onClick}
+            className="inline-flex min-h-11 items-center border border-neutral-700 px-4 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant"
+          >
+            {mobileBackAction.label}
+          </button>
+        </div>
+      ) : null}
+
       {error ? <p className="mb-6 border border-error-container bg-error-container/20 p-3 text-sm text-error">{error}</p> : null}
       {message ? <p className="mb-6 border border-primary/30 bg-primary/10 p-3 text-sm text-primary">{message}</p> : null}
 
@@ -193,28 +242,67 @@ function PlayerRosterScreen({
   matches: Match[];
   onDone: (message: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [sortMode, setSortMode] = useState<RosterSortMode>("A-Z");
+
+  const filteredPlayers = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const nextPlayers = players.filter((player) => player.name.toLowerCase().includes(normalizedQuery));
+
+    nextPlayers.sort((a, b) => {
+      if (sortMode === "A-Z") {
+        return a.name.localeCompare(b.name);
+      }
+
+      const aElo = a.elo;
+      const bElo = b.elo;
+
+      if (aElo === null && bElo === null) {
+        return a.name.localeCompare(b.name);
+      }
+
+      if (aElo === null) {
+        return 1;
+      }
+
+      if (bElo === null) {
+        return -1;
+      }
+
+      return sortMode === "ELO high to low" ? bElo - aElo : aElo - bElo;
+    });
+
+    return nextPlayers;
+  }, [players, query, sortMode]);
+
   return (
     <section className="space-y-6">
       <section className="border border-neutral-800 bg-surface-container p-5">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant">Admin Home</p>
         <h2 className="mt-2 font-serif text-3xl text-on-surface">Player Roster</h2>
-        <p className="mt-2 text-sm text-on-surface-variant">Create and maintain the master player library. ELO is stored as a numeric field in `players.elo`.</p>
+        <p className="mt-2 text-sm text-on-surface-variant">Search, sort, and maintain the master player library. ELO is stored in `players.elo` as a numeric field.</p>
       </section>
 
       <CreatePlayerForm onDone={onDone} players={players} />
       <BulkPlayerImportForm onDone={onDone} />
 
       <section className="border border-neutral-800 bg-surface-container p-5">
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
-          <h3 className="font-serif text-2xl text-on-surface">All Players</h3>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{players.length} total</p>
+        <div className="flex flex-col gap-4 border-b border-neutral-800 pb-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h3 className="font-serif text-2xl text-on-surface">All Players</h3>
+            <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{filteredPlayers.length} shown / {players.length} total</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[260px_220px]">
+            <TextInput label="Search player" value={query} onChange={setQuery} placeholder="Type a player name" />
+            <SelectInput label="Sort" value={sortMode} onChange={(value) => setSortMode(value as RosterSortMode)} options={rosterSortModes as unknown as string[]} />
+          </div>
         </div>
-        {players.length === 0 ? (
-          <p className="pt-5 text-sm text-on-surface-variant">No players yet. Add the first roster entry above.</p>
+        {filteredPlayers.length === 0 ? (
+          <p className="pt-5 text-sm text-on-surface-variant">No players match the current search or sort view.</p>
         ) : (
-          <div className="mt-5 grid gap-3">
-            {players.map((player) => (
-              <PlayerEditorCard
+          <div className="mt-5 space-y-3">
+            {filteredPlayers.map((player) => (
+              <PlayerEditorRow
                 key={player.id}
                 player={player}
                 tournaments={tournaments}
@@ -252,7 +340,7 @@ function TournamentLibraryScreen({
       <section className="border border-neutral-800 bg-surface-container p-5">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant">Tournament Control</p>
         <h2 className="mt-2 font-serif text-3xl text-on-surface">Tournament Library</h2>
-        <p className="mt-2 text-sm text-on-surface-variant">Open a tournament to manage its roster, create matches, and move into dedicated match editing.</p>
+        <p className="mt-2 text-sm text-on-surface-variant">Open a tournament to manage stages, groups, roster assignments, and match progression.</p>
       </section>
 
       <CreateTournamentForm onDone={onDone} />
@@ -307,7 +395,25 @@ function TournamentDetailScreen({
 }) {
   const rosterPlayers = players.filter((player) => tournament.player_ids.includes(player.id));
   const unassignedPlayers = players.filter((player) => !tournament.player_ids.includes(player.id));
-  const rounds = Array.from(new Set(matches.map((match) => match.round))).sort((a, b) => a - b);
+  const groupedRoster = getTournamentPlayersByGroup(tournament, players);
+  const stageMatches = tournament.stages.map((stage) => ({
+    stage,
+    matches: matches.filter((match) => match.stage_id === stage.id)
+  }));
+  const [openMobileSections, setOpenMobileSections] = useState<Record<string, boolean>>({
+    settings: true,
+    structure: false,
+    roster: true,
+    createMatch: false,
+    matches: true
+  });
+
+  function toggleMobileSection(sectionId: keyof typeof openMobileSections) {
+    setOpenMobileSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId]
+    }));
+  }
 
   return (
     <section className="space-y-6">
@@ -345,49 +451,139 @@ function TournamentDetailScreen({
         </div>
       </section>
 
-      <TournamentSettingsForm tournament={tournament} onDone={onDone} />
+      <MobileAccordionSection title="Tournament Settings" open={openMobileSections.settings} onToggle={() => toggleMobileSection("settings")}>
+        <TournamentSettingsForm tournament={tournament} onDone={onDone} compact />
+      </MobileAccordionSection>
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <TournamentRosterSection tournament={tournament} rosterPlayers={rosterPlayers} availablePlayers={unassignedPlayers} onDone={onDone} />
-        <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} />
-      </section>
+      <MobileAccordionSection title="Tournament Structure" open={openMobileSections.structure} onToggle={() => toggleMobileSection("structure")}>
+        <TournamentStagesForm tournament={tournament} onDone={onDone} compact />
+      </MobileAccordionSection>
 
-      <section className="border border-neutral-800 bg-surface-container p-5">
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
-          <h3 className="font-serif text-2xl text-on-surface">Matches</h3>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{matches.length} total</p>
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <MobileAccordionSection title="Tournament Roster" open={openMobileSections.roster} onToggle={() => toggleMobileSection("roster")} className="xl:hidden">
+          <TournamentRosterSection
+            tournament={tournament}
+            rosterPlayers={rosterPlayers}
+            groupedRoster={groupedRoster}
+            availablePlayers={unassignedPlayers}
+            onDone={onDone}
+            compact
+          />
+        </MobileAccordionSection>
+        <div className="hidden xl:block">
+          <TournamentRosterSection
+            tournament={tournament}
+            rosterPlayers={rosterPlayers}
+            groupedRoster={groupedRoster}
+            availablePlayers={unassignedPlayers}
+            onDone={onDone}
+          />
         </div>
-        {matches.length === 0 ? (
-          <p className="pt-5 text-sm text-on-surface-variant">No matches created yet. Add players to the roster first, then create the first pairing.</p>
-        ) : (
-          <div className="mt-5 space-y-4">
-            {rounds.map((round) => (
-              <div key={round}>
-                <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">Round {round}</p>
-                <div className="flex flex-wrap gap-2">
-                  {matches
-                    .filter((match) => match.round === round)
-                    .map((match) => (
-                      <button
-                        key={match.id}
-                        type="button"
-                        onClick={() => onOpenMatch(match.id)}
-                        className="min-h-11 border border-outline-variant bg-surface-container-low px-4 py-3 text-left text-sm transition hover:border-primary hover:text-primary"
-                      >
-                        <span className="block font-semibold">
-                          {getPlayerName(players, match.player1_id)} vs {getPlayerName(players, match.player2_id)}
-                        </span>
-                        <span className="mt-1 block text-xs uppercase tracking-[0.14em] text-on-surface-variant">
-                          {match.result ?? "Pending"}
-                        </span>
-                      </button>
-                    ))}
+
+        <MobileAccordionSection title="Add Match" open={openMobileSections.createMatch} onToggle={() => toggleMobileSection("createMatch")} className="xl:hidden">
+          <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} compact />
+        </MobileAccordionSection>
+        <div className="hidden xl:block">
+          <CreateTournamentMatchForm tournament={tournament} rosterPlayers={rosterPlayers} onDone={onDone} />
+        </div>
+      </div>
+
+      <MobileAccordionSection title={`Matches (${matches.length})`} open={openMobileSections.matches} onToggle={() => toggleMobileSection("matches")} className="xl:hidden">
+        <TournamentMatchSections matches={matches} players={players} stageMatches={stageMatches} onOpenMatch={onOpenMatch} compact />
+      </MobileAccordionSection>
+      <TournamentMatchSections matches={matches} players={players} stageMatches={stageMatches} onOpenMatch={onOpenMatch} className="hidden xl:block" />
+    </section>
+  );
+}
+
+function MobileAccordionSection({
+  title,
+  open,
+  onToggle,
+  children,
+  className = ""
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={className}>
+      <div className="border border-neutral-800 bg-surface-container">
+        <button type="button" onClick={onToggle} className="flex min-h-14 w-full items-center justify-between gap-4 px-4 text-left">
+          <span className="font-serif text-2xl text-on-surface">{title}</span>
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">{open ? "Close" : "Open"}</span>
+        </button>
+        {open ? <div className="border-t border-neutral-800">{children}</div> : null}
+      </div>
+    </section>
+  );
+}
+
+function TournamentMatchSections({
+  matches,
+  players,
+  stageMatches,
+  onOpenMatch,
+  compact,
+  className = ""
+}: {
+  matches: Match[];
+  players: Player[];
+  stageMatches: Array<{ stage: TournamentStage; matches: Match[] }>;
+  onOpenMatch: (matchId: string) => void;
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <section className={`border border-neutral-800 bg-surface-container p-5 ${className}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
+        <h3 className="font-serif text-2xl text-on-surface">Matches</h3>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{matches.length} total</p>
+      </div>
+      {matches.length === 0 ? (
+        <p className="pt-5 text-sm text-on-surface-variant">No matches created yet. Define groups, assign players, then create fixtures by stage.</p>
+      ) : (
+        <div className="mt-5 space-y-5">
+          {stageMatches.map(({ stage, matches: stageItems }) => (
+            <div key={stage.id}>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">{stage.name}</p>
+              {stage.type === "group" ? (
+                <div className="space-y-4">
+                  {(stage.groups ?? []).map((groupCode) => {
+                    const groupMatches = stageItems.filter((match) => match.group_id === groupCode);
+
+                    return (
+                      <div key={groupCode}>
+                        <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-primary">Group {groupCode}</p>
+                        {groupMatches.length === 0 ? (
+                          <p className="text-sm text-on-surface-variant">No matches yet.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {groupMatches.map((match) => (
+                              <MatchChip key={match.id} match={match} players={players} onOpenMatch={onOpenMatch} compact={compact} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ) : stageItems.length === 0 ? (
+                <p className="text-sm text-on-surface-variant">No matches yet.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {stageItems.map((match) => (
+                    <MatchChip key={match.id} match={match} players={players} onOpenMatch={onOpenMatch} compact={compact} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -423,7 +619,9 @@ function MatchDetailScreen({
             <h2 className="mt-2 font-serif text-3xl text-on-surface">
               {getPlayerName(players, match.player1_id)} vs {getPlayerName(players, match.player2_id)}
             </h2>
-            <p className="mt-2 text-sm text-on-surface-variant">Round {match.round} - {match.result ?? "Pending result"}</p>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              {getStageName(tournament, match.stage_id)}{match.group_id ? ` - Group ${match.group_id}` : ""} - {match.result ?? "Pending result"}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href={`/match/${match.id}`} className="inline-flex min-h-11 items-center border border-primary px-4 text-xs font-bold uppercase tracking-[0.16em] text-primary">
@@ -444,7 +642,7 @@ function MatchDetailScreen({
         </div>
       </section>
 
-      <MatchEditorCard match={match} players={eligiblePlayers} onDone={onDone} />
+      <MatchEditorCard match={match} tournament={tournament} players={eligiblePlayers} onDone={onDone} />
     </section>
   );
 }
@@ -465,7 +663,7 @@ function NavButton({ label, active, onClick }: { label: string; active: boolean;
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-11 border px-4 text-xs font-bold uppercase tracking-[0.16em] ${
+      className={`min-h-11 border px-4 text-[10px] font-bold uppercase tracking-[0.14em] md:text-xs md:tracking-[0.16em] ${
         active ? "border-primary bg-primary text-on-primary" : "border-outline-variant text-on-surface-variant"
       }`}
     >
@@ -474,10 +672,37 @@ function NavButton({ label, active, onClick }: { label: string; active: boolean;
   );
 }
 
+function MatchChip({
+  match,
+  players,
+  onOpenMatch,
+  compact
+}: {
+  match: Match;
+  players: Player[];
+  onOpenMatch: (matchId: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenMatch(match.id)}
+      className={`border border-outline-variant bg-surface-container-low text-left transition hover:border-primary hover:text-primary ${
+        compact ? "min-h-10 px-3 py-2 text-xs" : "min-h-11 px-4 py-3 text-sm"
+      }`}
+    >
+      <span className="block font-semibold">
+        {getPlayerName(players, match.player1_id)} vs {getPlayerName(players, match.player2_id)}
+      </span>
+      <span className={`mt-1 block uppercase tracking-[0.14em] text-on-surface-variant ${compact ? "text-[10px]" : "text-xs"}`}>{match.result ?? "Pending"}</span>
+    </button>
+  );
+}
+
 function CreateTournamentForm({ onDone }: { onDone: (message: string) => void }) {
   const [name, setName] = useState("");
   const [date, setDate] = useState("");
-  const [rounds, setRounds] = useState(5);
+  const [rounds, setRounds] = useState(4);
   const [status, setStatus] = useState<TournamentStatus>("upcoming");
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -485,7 +710,7 @@ function CreateTournamentForm({ onDone }: { onDone: (message: string) => void })
     await createTournament({ name: name.trim(), date, rounds, status });
     setName("");
     setDate("");
-    setRounds(5);
+    setRounds(4);
     setStatus("upcoming");
     onDone("Tournament created.");
   }
@@ -585,7 +810,7 @@ function BulkPlayerImportForm({ onDone }: { onDone: (message: string) => void })
   );
 }
 
-function PlayerEditorCard({
+function PlayerEditorRow({
   player,
   tournaments,
   matches,
@@ -600,6 +825,7 @@ function PlayerEditorCard({
   const [eloInput, setEloInput] = useState(player.elo === null ? "" : String(player.elo));
   const assignedTournamentIds = tournaments.filter((tournament) => tournament.player_ids.includes(player.id)).map((tournament) => tournament.id);
   const usedInMatches = matches.some((match) => match.player1_id === player.id || match.player2_id === player.id);
+  const tournamentCount = assignedTournamentIds.length;
 
   return (
     <form
@@ -615,11 +841,12 @@ function PlayerEditorCard({
         await updatePlayer(player.id, { name: name.trim(), elo });
         onDone(`Updated ${name.trim()}.`);
       }}
-      className="grid gap-3 border border-neutral-800 bg-surface-container-low p-4 sm:grid-cols-[minmax(0,1fr)_160px_auto_auto]"
+      className="grid gap-3 border border-neutral-800 bg-surface-container-low p-4 lg:grid-cols-[minmax(0,1fr)_160px_130px_auto_auto]"
     >
       <TextInput label="Player" value={name} onChange={setName} required />
       <TextInput label="ELO" value={eloInput} onChange={setEloInput} type="number" min={0} />
-      <button className="min-h-12 border border-outline-variant px-4 text-xs font-bold uppercase tracking-[0.16em] sm:self-end">Save</button>
+      <StaticMetric label="Tournaments" value={String(tournamentCount)} />
+      <button className="min-h-12 border border-outline-variant px-4 text-xs font-bold uppercase tracking-[0.16em] lg:self-end">Save</button>
       <button
         type="button"
         disabled={usedInMatches}
@@ -627,31 +854,45 @@ function PlayerEditorCard({
           await deletePlayerAndCleanup(player.id, assignedTournamentIds);
           onDone(`Deleted ${player.name}.`);
         }}
-        className="min-h-12 border border-error px-4 text-xs font-bold uppercase tracking-[0.16em] text-error disabled:cursor-not-allowed disabled:opacity-50 sm:self-end"
+        className="min-h-12 border border-error px-4 text-xs font-bold uppercase tracking-[0.16em] text-error disabled:cursor-not-allowed disabled:opacity-50 lg:self-end"
       >
         Delete
       </button>
-      {usedInMatches ? <p className="text-xs text-on-surface-variant sm:col-span-4">This player is locked because they are referenced by an existing match.</p> : null}
+      {usedInMatches ? <p className="text-xs text-on-surface-variant lg:col-span-5">This player is locked because they are referenced by an existing match.</p> : null}
     </form>
   );
 }
 
-function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament; onDone: (message: string) => void }) {
+function TournamentSettingsForm({
+  tournament,
+  onDone,
+  compact
+}: {
+  tournament: Tournament;
+  onDone: (message: string) => void;
+  compact?: boolean;
+}) {
   const [name, setName] = useState(tournament.name);
   const [date, setDate] = useState(tournament.date);
   const [rounds, setRounds] = useState(tournament.rounds);
   const [status, setStatus] = useState<TournamentStatus>(tournament.status);
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
-      <h3 className="font-serif text-2xl text-on-surface">Tournament Settings</h3>
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
+      {compact ? null : <h3 className="font-serif text-2xl text-on-surface">Tournament Settings</h3>}
       <form
         onSubmit={async (event) => {
           event.preventDefault();
-          await updateTournament(tournament.id, { name: name.trim(), date, rounds, status });
+          await updateTournament(tournament.id, {
+            name: name.trim(),
+            date,
+            rounds,
+            status,
+            stages: syncStagesToRoundCount(tournament.stages, rounds)
+          });
           onDone("Tournament updated.");
         }}
-        className="mt-5 grid gap-4 sm:grid-cols-2"
+        className={`${compact ? "" : "mt-5 "}grid gap-4 sm:grid-cols-2`}
       >
         <TextInput label="Name" value={name} onChange={setName} required className="sm:col-span-2" />
         <TextInput label="Date" value={date} onChange={setDate} type="date" required />
@@ -665,21 +906,133 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
   );
 }
 
+function TournamentStagesForm({
+  tournament,
+  onDone,
+  compact
+}: {
+  tournament: Tournament;
+  onDone: (message: string) => void;
+  compact?: boolean;
+}) {
+  const [groupCodesInput, setGroupCodesInput] = useState((getGroupStage(tournament)?.groups ?? []).join(", "));
+  const [stages, setStages] = useState<TournamentStage[]>(tournament.stages);
+
+  return (
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
+      {compact ? null : <h3 className="font-serif text-2xl text-on-surface">Tournament Structure</h3>}
+      <p className={`${compact ? "" : "mt-2 "}text-sm text-on-surface-variant`}>V1 uses a single opening group stage, followed by knockout stages. You can rename knockout stages and add or remove them here.</p>
+      <form
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const groupCodes = parseGroupCodes(groupCodesInput);
+
+          if (groupCodes.length === 0) {
+            onDone("Enter at least one group code.");
+            return;
+          }
+
+          const nextStages = stages.map((stage, index) => ({
+            ...stage,
+            round: index + 1,
+            name: stage.name.trim() || (stage.type === "group" ? "Group Stage" : `Knockout Round ${index}`)
+          }));
+
+          // Firestore rejects `undefined` field values. Only attach `groups` for the group stage.
+          const sanitizedStages = nextStages.map((stage) =>
+            stage.type === "group" ? { ...stage, groups: groupCodes } : (({ groups: _groups, ...rest }) => rest)(stage)
+          );
+
+          try {
+            await updateTournament(tournament.id, { stages: sanitizedStages, rounds: sanitizedStages.length });
+            onDone("Tournament stages updated.");
+          } catch (error) {
+            onDone(error instanceof Error ? error.message : "Failed to update tournament structure.");
+          }
+        }}
+        className={`${compact ? "mt-4" : "mt-5"} space-y-4`}
+      >
+        <TextInput label="Group codes" value={groupCodesInput} onChange={setGroupCodesInput} placeholder="A, B, C, D" />
+        <div className="space-y-3">
+          {stages.map((stage, index) => (
+            <div key={stage.id} className="grid gap-3 border border-neutral-800 bg-surface-container-low p-4 md:grid-cols-[140px_minmax(0,1fr)_auto]">
+              <StaticMetric label="Stage" value={`Round ${index + 1}`} />
+              <TextInput
+                label={stage.type === "group" ? "Group stage name" : "Knockout stage name"}
+                value={stage.name}
+                onChange={(value) => {
+                  setStages((current) =>
+                    current.map((item) => (item.id === stage.id ? { ...item, name: value } : item))
+                  );
+                }}
+              />
+              <div className="md:self-end">
+                {stage.type === "group" ? (
+                  <StaticMetric label="Type" value="Group" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStages((current) => current.filter((item) => item.id !== stage.id).map((item, itemIndex) => ({ ...item, round: itemIndex + 1 })));
+                    }}
+                    className="min-h-12 border border-error px-4 text-xs font-bold uppercase tracking-[0.16em] text-error"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setStages((current) => {
+              const nextRound = current.length + 1;
+              return [
+                ...current,
+                {
+                  id: slugifyStageName(`knockout-${Date.now()}`),
+                  name: `Knockout Round ${nextRound - 1}`,
+                  type: "knockout",
+                  round: nextRound
+                }
+              ];
+            });
+          }}
+          className="min-h-11 border border-outline-variant px-4 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant"
+        >
+          Add knockout stage
+        </button>
+        <button className="min-h-12 border border-primary px-5 text-xs font-bold uppercase tracking-[0.16em] text-primary">
+          Save structure
+        </button>
+      </form>
+    </section>
+  );
+}
+
 function TournamentRosterSection({
   tournament,
   rosterPlayers,
+  groupedRoster,
   availablePlayers,
-  onDone
+  onDone,
+  compact
 }: {
   tournament: Tournament;
   rosterPlayers: Player[];
+  groupedRoster: ReturnType<typeof getTournamentPlayersByGroup>;
   availablePlayers: Player[];
   onDone: (message: string) => void;
+  compact?: boolean;
 }) {
   const [playerIdToAdd, setPlayerIdToAdd] = useState("");
+  const groupStage = getGroupStage(tournament);
+  const groupCodes = groupStage?.groups ?? [];
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
       <div className="flex items-center justify-between gap-3 border-b border-neutral-800 pb-4">
         <h3 className="font-serif text-2xl text-on-surface">Tournament Roster</h3>
         <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{rosterPlayers.length} assigned</p>
@@ -688,25 +1041,34 @@ function TournamentRosterSection({
       {rosterPlayers.length === 0 ? (
         <p className="pt-5 text-sm text-on-surface-variant">No players assigned yet. Add players below before creating matches.</p>
       ) : (
-        <div className="mt-5 flex flex-wrap gap-2">
-          {rosterPlayers.map((player) => (
-            <div key={player.id} className="flex min-h-11 items-center gap-3 border border-outline-variant bg-surface-container-low px-4 py-2 text-sm">
-              <div>
-                <span className="block font-semibold">{player.name}</span>
-                <span className="block text-[10px] uppercase tracking-[0.14em] text-on-surface-variant">{formatElo(player.elo)}</span>
-              </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  await removePlayerFromTournament(tournament.id, player.id);
-                  onDone(`Removed ${player.name} from ${tournament.name}.`);
-                }}
-                className="text-xs font-bold uppercase tracking-[0.14em] text-on-surface-variant"
-              >
-                Remove
-              </button>
+        <div className="mt-5 space-y-5">
+          {groupCodes.map((groupCode) => (
+            <div key={groupCode}>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-primary">Group {groupCode}</p>
+              {(groupedRoster.grouped.get(groupCode) ?? []).length === 0 ? (
+                <p className="text-sm text-on-surface-variant">No players assigned.</p>
+              ) : (
+                <div className="space-y-3">
+                  {(groupedRoster.grouped.get(groupCode) ?? []).map((player) => (
+                    <PlayerGroupRow key={player.id} player={player} tournament={tournament} groupCodes={groupCodes} onDone={onDone} />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
+
+          <div>
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">Unassigned</p>
+            {groupedRoster.unassigned.length === 0 ? (
+              <p className="text-sm text-on-surface-variant">Every rostered player is already placed in a group.</p>
+            ) : (
+              <div className="space-y-3">
+                {groupedRoster.unassigned.map((player) => (
+                  <PlayerGroupRow key={player.id} player={player} tournament={tournament} groupCodes={groupCodes} onDone={onDone} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -749,24 +1111,110 @@ function TournamentRosterSection({
   );
 }
 
+function PlayerGroupRow({
+  player,
+  tournament,
+  groupCodes,
+  onDone
+}: {
+  player: Player;
+  tournament: Tournament;
+  groupCodes: string[];
+  onDone: (message: string) => void;
+}) {
+  return (
+    <div className="grid gap-3 border border-neutral-800 bg-surface-container-low p-4 md:grid-cols-[minmax(0,1fr)_200px_auto]">
+      <div>
+        <span className="block font-semibold text-on-surface">{player.name}</span>
+        <span className="block text-[10px] uppercase tracking-[0.14em] text-on-surface-variant">{formatElo(player.elo)}</span>
+      </div>
+      <SelectInput
+        label="Group"
+        value={tournament.group_assignments[player.id] ?? ""}
+        onChange={async (value) => {
+          await setTournamentPlayerGroup(tournament.id, player.id, value || null);
+          onDone(value ? `Assigned ${player.name} to Group ${value}.` : `Cleared group for ${player.name}.`);
+        }}
+        options={groupCodes.map((groupCode) => ({ value: groupCode, label: `Group ${groupCode}` }))}
+      />
+      <button
+        type="button"
+        onClick={async () => {
+          await removePlayerFromTournament(tournament.id, player.id);
+          onDone(`Removed ${player.name} from ${tournament.name}.`);
+        }}
+        className="min-h-12 border border-outline-variant px-4 text-xs font-bold uppercase tracking-[0.14em] text-on-surface-variant md:self-end"
+      >
+        Remove
+      </button>
+    </div>
+  );
+}
+
 function CreateTournamentMatchForm({
   tournament,
   rosterPlayers,
-  onDone
+  onDone,
+  compact
 }: {
   tournament: Tournament;
   rosterPlayers: Player[];
   onDone: (message: string) => void;
+  compact?: boolean;
 }) {
-  const [round, setRound] = useState(1);
+  const [stageId, setStageId] = useState(tournament.stages[0]?.id ?? "");
+  const [groupId, setGroupId] = useState("");
   const [player1Id, setPlayer1Id] = useState("");
   const [player2Id, setPlayer2Id] = useState("");
+
+  const stage = tournament.stages.find((item) => item.id === stageId) ?? tournament.stages[0] ?? null;
+  const eligiblePlayers = stage?.type === "group"
+    ? rosterPlayers.filter((player) => tournament.group_assignments[player.id] === groupId)
+    : rosterPlayers;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (rosterPlayers.length < 2) {
       onDone("Add at least two rostered players before creating a match.");
+      return;
+    }
+
+    if (!stage) {
+      onDone("Create tournament stages first.");
+      return;
+    }
+
+    if (stage.type === "group") {
+      if (!groupId) {
+        onDone("Choose a group for the group-stage match.");
+        return;
+      }
+
+      if (!tournament.group_assignments[player1Id] || !tournament.group_assignments[player2Id]) {
+        onDone("Assign both players to a group before creating a group-stage match.");
+        return;
+      }
+
+      if (tournament.group_assignments[player1Id] !== groupId || tournament.group_assignments[player2Id] !== groupId) {
+        onDone("Group-stage matches must use players from the selected group only.");
+        return;
+      }
+    }
+
+    if (stage.type === "knockout" && !player1Id && !player2Id) {
+      await createMatch({
+        tournament_id: tournament.id,
+        round: stage.round,
+        stage_id: stage.id,
+        group_id: null,
+        player1_id: "",
+        player2_id: ""
+      });
+
+      setPlayer1Id("");
+      setPlayer2Id("");
+      onDone("Knockout placeholder created.");
       return;
     }
 
@@ -777,31 +1225,74 @@ function CreateTournamentMatchForm({
 
     await createMatch({
       tournament_id: tournament.id,
-      round,
+      round: stage.round,
+      stage_id: stage.id,
+      group_id: stage.type === "group" ? groupId : null,
       player1_id: player1Id,
       player2_id: player2Id
     });
 
-    setRound(1);
     setPlayer1Id("");
     setPlayer2Id("");
     onDone("Match created.");
   }
 
   return (
-    <section className="border border-neutral-800 bg-surface-container p-5">
+    <section className={compact ? "bg-surface-container p-4" : "border border-neutral-800 bg-surface-container p-5"}>
       <div className="border-b border-neutral-800 pb-4">
         <h3 className="font-serif text-2xl text-on-surface">Add Match</h3>
-        <p className="mt-2 text-sm text-on-surface-variant">Only players already assigned to this tournament can be paired here.</p>
+        <p className="mt-2 text-sm text-on-surface-variant">Group-stage pairings are locked to the selected group. Knockout stages accept any rostered players.</p>
       </div>
 
       {rosterPlayers.length < 2 ? (
         <p className="pt-5 text-sm text-on-surface-variant">Tournament roster is empty or incomplete. Add at least two players in the roster section first.</p>
       ) : (
         <form onSubmit={onSubmit} className="mt-5 grid gap-4">
-          <TextInput label="Round" value={String(round)} onChange={(value) => setRound(Number(value))} type="number" min={1} required />
-          <SelectInput label="White" value={player1Id} onChange={setPlayer1Id} options={rosterPlayers.map((player) => ({ value: player.id, label: player.name }))} required />
-          <SelectInput label="Black" value={player2Id} onChange={setPlayer2Id} options={rosterPlayers.map((player) => ({ value: player.id, label: player.name }))} required />
+          <SelectInput
+            label="Stage"
+            value={stageId}
+            onChange={(value) => {
+              setStageId(value);
+              setGroupId("");
+              setPlayer1Id("");
+              setPlayer2Id("");
+            }}
+            options={tournament.stages.map((stageItem) => ({ value: stageItem.id, label: stageItem.name }))}
+            required
+          />
+          {stage?.type === "group" ? (
+            <SelectInput
+              label="Group"
+              value={groupId}
+              onChange={(value) => {
+                setGroupId(value);
+                setPlayer1Id("");
+                setPlayer2Id("");
+              }}
+              options={(stage.groups ?? []).map((groupCode) => ({ value: groupCode, label: `Group ${groupCode}` }))}
+              required
+            />
+          ) : null}
+          <SelectInput
+            label="White"
+            value={player1Id}
+            onChange={setPlayer1Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
+          <SelectInput
+            label="Black"
+            value={player2Id}
+            onChange={setPlayer2Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
+          {stage?.type === "knockout" ? (
+            <p className="text-sm text-on-surface-variant">Leave one or both player slots empty to publish a `TBD` knockout fixture during the group stage.</p>
+          ) : null}
+          {stage?.type === "group" && groupId && eligiblePlayers.length < 2 ? (
+            <p className="text-sm text-on-surface-variant">This group does not yet have enough assigned players to create a match.</p>
+          ) : null}
           <button className="min-h-12 bg-primary px-5 text-xs font-bold uppercase tracking-[0.16em] text-on-primary">Create match</button>
         </form>
       )}
@@ -811,18 +1302,25 @@ function CreateTournamentMatchForm({
 
 function MatchEditorCard({
   match,
+  tournament,
   players,
   onDone
 }: {
   match: Match;
+  tournament: Tournament;
   players: Player[];
   onDone: (message: string) => void;
 }) {
-  const [round, setRound] = useState(match.round);
+  const [stageId, setStageId] = useState(match.stage_id);
+  const [groupId, setGroupId] = useState(match.group_id ?? "");
   const [player1Id, setPlayer1Id] = useState(match.player1_id);
   const [player2Id, setPlayer2Id] = useState(match.player2_id);
   const [result, setResult] = useState<MatchResult>(match.result);
   const [pgn, setPgn] = useState(match.pgn ?? "");
+  const stage = tournament.stages.find((item) => item.id === stageId) ?? tournament.stages[0] ?? null;
+  const eligiblePlayers = stage?.type === "group"
+    ? players.filter((player) => tournament.group_assignments[player.id] === groupId || player.id === player1Id || player.id === player2Id)
+    : players;
 
   return (
     <section className="border border-neutral-800 bg-surface-container p-5">
@@ -831,13 +1329,32 @@ function MatchEditorCard({
         onSubmit={async (event) => {
           event.preventDefault();
 
-          if (player1Id === player2Id) {
+          if (stage?.type === "knockout" && player1Id && player1Id === player2Id) {
             onDone("Choose two different players.");
             return;
           }
 
+          if (stage?.type === "group" && player1Id === player2Id) {
+            onDone("Choose two different players.");
+            return;
+          }
+
+          if (stage?.type === "group") {
+            if (!groupId) {
+              onDone("Choose a group for the group-stage match.");
+              return;
+            }
+
+            if (tournament.group_assignments[player1Id] !== groupId || tournament.group_assignments[player2Id] !== groupId) {
+              onDone("Group-stage matches must use players from the selected group only.");
+              return;
+            }
+          }
+
           await updateMatch(match.id, {
-            round,
+            round: stage?.round ?? match.round,
+            stage_id: stageId,
+            group_id: stage?.type === "group" ? groupId : null,
             player1_id: player1Id,
             player2_id: player2Id,
             result,
@@ -847,10 +1364,51 @@ function MatchEditorCard({
         }}
         className="mt-5 grid gap-5"
       >
-        <div className="grid gap-4 md:grid-cols-3">
-          <TextInput label="Round" value={String(round)} onChange={(value) => setRound(Number(value))} type="number" min={1} required />
-          <SelectInput label="White" value={player1Id} onChange={setPlayer1Id} options={players.map((player) => ({ value: player.id, label: player.name }))} required />
-          <SelectInput label="Black" value={player2Id} onChange={setPlayer2Id} options={players.map((player) => ({ value: player.id, label: player.name }))} required />
+        <div className="grid gap-4 md:grid-cols-2">
+          <SelectInput
+            label="Stage"
+            value={stageId}
+            onChange={(value) => {
+              setStageId(value);
+              setGroupId("");
+              setPlayer1Id("");
+              setPlayer2Id("");
+            }}
+            options={tournament.stages.map((stageItem) => ({ value: stageItem.id, label: stageItem.name }))}
+            required
+          />
+          {stage?.type === "group" ? (
+            <SelectInput
+              label="Group"
+              value={groupId}
+              onChange={(value) => {
+                setGroupId(value);
+                setPlayer1Id("");
+                setPlayer2Id("");
+              }}
+              options={(stage.groups ?? []).map((groupCode) => ({ value: groupCode, label: `Group ${groupCode}` }))}
+              required
+            />
+          ) : (
+            <StaticMetric label="Round" value={`Round ${stage?.round ?? match.round}`} />
+          )}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <SelectInput
+            label="White"
+            value={player1Id}
+            onChange={setPlayer1Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
+          <SelectInput
+            label="Black"
+            value={player2Id}
+            onChange={setPlayer2Id}
+            options={eligiblePlayers.map((player) => ({ value: player.id, label: player.name }))}
+            required={stage?.type === "group"}
+          />
         </div>
 
         <div>
@@ -917,7 +1475,8 @@ function TextInput({
   className = "",
   type = "text",
   required,
-  min
+  min,
+  placeholder
 }: {
   label: string;
   value: string;
@@ -926,6 +1485,7 @@ function TextInput({
   type?: string;
   required?: boolean;
   min?: number;
+  placeholder?: string;
 }) {
   return (
     <label className={`block ${className}`}>
@@ -936,6 +1496,7 @@ function TextInput({
         type={type}
         min={min}
         required={required}
+        placeholder={placeholder}
         className="mt-2 w-full border border-outline-variant bg-surface-dim px-3 py-3 text-sm text-on-surface outline-none focus:border-primary"
       />
     </label>
@@ -952,7 +1513,7 @@ function SelectInput({
 }: {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (value: string) => void | Promise<void>;
   options: Array<string | { value: string; label: string }>;
   required?: boolean;
   className?: string;
@@ -962,7 +1523,9 @@ function SelectInput({
       <span className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{label}</span>
       <select
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          void onChange(event.target.value);
+        }}
         required={required}
         className="mt-2 w-full border border-outline-variant bg-surface-dim px-3 py-3 text-sm text-on-surface outline-none focus:border-primary"
       >
@@ -978,6 +1541,15 @@ function SelectInput({
         })}
       </select>
     </label>
+  );
+}
+
+function StaticMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="block">
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">{label}</span>
+      <div className="mt-2 min-h-[48px] border border-outline-variant bg-surface-dim px-3 py-3 text-sm text-on-surface">{value}</div>
+    </div>
   );
 }
 
@@ -1037,4 +1609,49 @@ function parseBulkPlayers(rawLines: string):
   }
 
   return { ok: true, players };
+}
+
+function parseGroupCodes(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function syncStagesToRoundCount(stages: TournamentStage[], rounds: number) {
+  const safeRounds = Math.max(1, rounds);
+  const groupStage = stages.find((stage) => stage.type === "group") ?? createDefaultStages(1)[0];
+  const knockoutStages = stages.filter((stage) => stage.type === "knockout");
+
+  const nextStages: TournamentStage[] = [
+    {
+      ...groupStage,
+      round: 1,
+      groups: groupStage.groups?.length ? groupStage.groups : ["A", "B", "C", "D"]
+    }
+  ];
+
+  for (let index = 0; index < safeRounds - 1; index += 1) {
+    const existing = knockoutStages[index];
+    nextStages.push(
+      existing
+        ? (({ groups: _groups, ...rest }) => ({ ...rest, round: index + 2 }))(existing)
+        : {
+            id: `knockout-${index + 2}`,
+            name: `Knockout Round ${index + 1}`,
+            type: "knockout",
+            round: index + 2
+          }
+    );
+  }
+
+  return nextStages;
+}
+
+function getStageName(tournament: Tournament, stageId: string) {
+  return tournament.stages.find((stage) => stage.id === stageId)?.name ?? "Stage";
 }
