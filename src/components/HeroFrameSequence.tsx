@@ -288,8 +288,7 @@ export function HeroFrameSequence() {
             <span className="hidden h-2 w-2 rotate-45 border border-[#9f7952] md:block" />
           </div>
           <p className="mt-5 max-w-[470px] bg-gradient-to-b from-[#efe3d4] via-[#d4ccbf] to-[#a9875c] bg-clip-text text-base leading-7 text-transparent md:text-lg">
-            A platform built to capture every game, every result, and every decisive moment on the board.
-            From opening to endgame, every match in one place.
+            The central platform for university chess - bringing together tournaments, standings, fixtures, and recorded games within a structured competitive environment.
           </p>
         </div>
       </div>
@@ -298,24 +297,32 @@ export function HeroFrameSequence() {
         <div className="mx-auto h-full w-full max-w-[1440px] px-5 py-24 md:px-8">
           <div className="relative hidden h-full md:block">
             <div className="absolute left-0 top-[16%]">
-              <Callout align="left" text="Play." />
+              <Callout align="left" text="Observe" />
             </div>
             <div className="absolute right-0 top-[29%]">
-              <Callout align="right" text="Think." />
+              <Callout align="right" text="Calculate" />
             </div>
             <div className="absolute left-0 top-[53%]">
-              <Callout align="left" text="Dominate." />
+              <Callout align="left" text="Convert" />
             </div>
             <div className="absolute left-1/2 top-[73%] -translate-x-1/2">
               <Callout align="center" text="The board is set!" />
+              <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-200/80">
+                compete with discipline
+              </p>
             </div>
           </div>
 
           <div className="mt-auto grid gap-4 self-end pb-28 text-center md:hidden">
-            <MobileWord>Play.</MobileWord>
-            <MobileWord>Think.</MobileWord>
-            <MobileWord>Dominate.</MobileWord>
-            <MobileWord>The board is set!</MobileWord>
+            <MobileWord>Observe</MobileWord>
+            <MobileWord>Calculate</MobileWord>
+            <MobileWord>Convert</MobileWord>
+            <div>
+              <MobileWord>The board is set!</MobileWord>
+              <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-200/80">
+                compete with discipline
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -324,17 +331,17 @@ export function HeroFrameSequence() {
         <div className="mx-auto mb-5 flex w-full max-w-[1440px] justify-center px-5 md:mb-6 md:px-8">
           <Link
             href="/tournaments"
-            aria-label="View tournaments"
+            aria-label="Enter the arena"
             className="inline-flex min-h-12 items-center justify-center border border-[#b79262] bg-[#b79262] px-8 text-xs font-bold uppercase tracking-[0.22em] text-[#120d09] shadow-[0_12px_36px_rgba(0,0,0,0.35)] transition hover:bg-[#c7a170]"
           >
-            View Tournaments
+            Enter the Arena
           </Link>
         </div>
         <div className="border-t border-[#6e5234] bg-[linear-gradient(180deg,rgba(8,8,8,0.72)_0%,rgba(8,8,8,0.9)_100%)] backdrop-blur-[4px]">
           <div className="mx-auto grid w-full max-w-[1440px] gap-5 px-5 py-5 md:grid-cols-[1.3fr_auto] md:items-end md:px-8 md:py-6">
             <div>
               <p className="bg-gradient-to-b from-[#f1dfc6] via-[#d8c0a0] to-[#9b7448] bg-clip-text font-serif text-2xl uppercase tracking-[0.06em] text-transparent md:text-[2.15rem]">
-                Experience evolves from structure.
+                Every move carries consequence.
               </p>
             </div>
           </div>

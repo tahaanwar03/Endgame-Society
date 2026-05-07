@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
@@ -16,8 +17,16 @@ export function AppHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
       <div className="mx-auto flex h-16 w-full max-w-container items-center justify-between px-4 md:px-8">
-        <Link href="/" className="font-serif text-lg font-bold italic text-primary md:text-xl">
-          The Endgame Society
+        <Link href="/" className="flex items-center gap-3 font-serif text-lg font-bold italic text-primary md:text-xl">
+          <Image
+            src="/brand/logo-square.png"
+            alt=""
+            width={32}
+            height={32}
+            priority={false}
+            className="h-8 w-8 rounded-sm border border-neutral-800 bg-neutral-950"
+          />
+          <span>The Endgame Society</span>
         </Link>
         <nav className="hidden items-center gap-5 text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 md:flex">
           {links.map((link) => {
