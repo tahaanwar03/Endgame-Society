@@ -306,7 +306,7 @@ export function HeroFrameSequence() {
             <div className="absolute left-0 top-[53%]">
               <Callout align="left" text="Dominate." />
             </div>
-            <div className="absolute left-0 top-[74%]">
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
               <Callout align="left" text="The board is set!" />
             </div>
           </div>
@@ -337,12 +337,6 @@ export function HeroFrameSequence() {
                 Experience evolves from structure.
               </p>
             </div>
-            <div className="flex flex-col gap-4 md:items-end">
-              <div className="flex items-center gap-2 bg-gradient-to-b from-[#efe3d4] via-[#cbb79a] to-[#9b7448] bg-clip-text text-[10px] uppercase tracking-[0.18em] text-transparent md:text-[11px]">
-                <CreditIcon />
-                <span>Taha Anwar B&apos;27</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -370,16 +364,6 @@ function MobileWord({ children }: { children: React.ReactNode }) {
       <p className="bg-gradient-to-b from-[#f2e0c8] via-[#d2b08a] to-[#8f6940] bg-clip-text font-sans text-2xl font-semibold uppercase tracking-[0.08em] text-transparent drop-shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
         {children}
       </p>
-    </span>
-  );
-}
-
-function CreditIcon() {
-  return (
-    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#8d6a44]/80" aria-hidden="true">
-      <svg viewBox="0 0 16 16" className="h-2.5 w-2.5 fill-none stroke-[#cbb79a]" aria-hidden="true">
-        <path d="M3 8h10M8 3v10" strokeWidth="1.2" strokeLinecap="round" />
-      </svg>
     </span>
   );
 }
