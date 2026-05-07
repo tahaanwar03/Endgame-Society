@@ -306,8 +306,8 @@ export function HeroFrameSequence() {
             <div className="absolute left-0 top-[53%]">
               <Callout align="left" text="Dominate." />
             </div>
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-              <Callout align="left" text="The board is set!" />
+            <div className="absolute left-1/2 top-[73%] -translate-x-1/2">
+              <Callout align="center" text="The board is set!" />
             </div>
           </div>
 
@@ -344,9 +344,9 @@ export function HeroFrameSequence() {
   );
 }
 
-function Callout({ text, align }: { text: string; align: "left" | "right" }) {
+function Callout({ text, align }: { text: string; align: "left" | "right" | "center" }) {
   return (
-    <div className={`flex items-center gap-5 ${align === "right" ? "justify-end" : ""}`}>
+    <div className={`flex items-center gap-5 ${align === "right" ? "justify-end" : "justify-center"}`}>
       {align === "right" ? <span className="h-px w-32 bg-gradient-to-r from-transparent to-[#8c6a44]" /> : null}
       <div className="rounded-sm bg-black/24 px-3 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-[2px]">
         <p className="bg-gradient-to-b from-[#f2e0c8] via-[#d2b08a] to-[#8f6940] bg-clip-text font-sans text-[2rem] font-semibold uppercase tracking-[0.06em] text-transparent drop-shadow-[0_2px_8px_rgba(0,0,0,0.45)] md:text-[3.15rem]">
