@@ -935,12 +935,20 @@ function TournamentStagesForm({
           const nextStages = stages.map((stage, index) => ({
             ...stage,
             round: index + 1,
-            groups: stage.type === "group" ? groupCodes : undefined,
             name: stage.name.trim() || (stage.type === "group" ? "Group Stage" : `Knockout Round ${index}`)
           }));
 
-          await updateTournament(tournament.id, { stages: nextStages, rounds: nextStages.length });
-          onDone("Tournament stages updated.");
+          // Firestore rejects `undefined` field values. Only attach `groups` for the group stage.
+          const sanitizedStages = nextStages.map((stage) =>
+            stage.type === "group" ? { ...stage, groups: groupCodes } : (({ groups: _groups, ...rest }) => rest)(stage)
+          );
+
+          try {
+            await updateTournament(tournament.id, { stages: sanitizedStages, rounds: sanitizedStages.length });
+            onDone("Tournament stages updated.");
+          } catch (error) {
+            onDone(error instanceof Error ? error.message : "Failed to update tournament structure.");
+          }
         }}
         className={`${compact ? "mt-4" : "mt-5"} space-y-4`}
       >
@@ -1631,7 +1639,7 @@ function syncStagesToRoundCount(stages: TournamentStage[], rounds: number) {
     const existing = knockoutStages[index];
     nextStages.push(
       existing
-        ? { ...existing, round: index + 2 }
+        ? (({ groups: _groups, ...rest }) => ({ ...rest, round: index + 2 }))(existing)
         : {
             id: `knockout-${index + 2}`,
             name: `Knockout Round ${index + 1}`,
