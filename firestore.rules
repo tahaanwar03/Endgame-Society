@@ -28,5 +28,18 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    match /games/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /sync_logs/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /sync_config/{document=**} {
+      allow read, write: if isAdmin();
+    }
   }
 }

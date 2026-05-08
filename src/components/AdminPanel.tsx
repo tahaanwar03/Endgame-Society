@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { logout, useAuthUser } from "@/lib/auth-hooks";
 import {
   addPlayerToTournament,
@@ -43,7 +43,7 @@ const results: MatchResult[] = ["1-0", "0-1", "1/2-1/2", null];
 const rosterSortModes = ["A-Z", "ELO high to low", "ELO low to high"] as const;
 
 type RosterSortMode = (typeof rosterSortModes)[number];
-type AdminScreen = "roster" | "tournaments" | "tournament" | "match";
+type AdminScreen = "roster" | "tournaments" | "tournament" | "match" | "lichess-sync";
 
 export function AdminPanel() {
   const auth = useAuthUser();
@@ -81,10 +81,11 @@ export function AdminPanel() {
     );
   }
 
+  const manualTournaments = tournaments.data.filter((item) => item.source !== "lichess");
   const error = tournaments.error || players.error || matches.error;
-  const selectedTournament = tournaments.data.find((item) => item.id === selectedTournamentId) ?? null;
+  const selectedTournament = manualTournaments.find((item) => item.id === selectedTournamentId) ?? null;
   const selectedMatch = matches.data.find((item) => item.id === selectedMatchId) ?? null;
-  const tournamentForMatch = selectedTournament ?? tournaments.data.find((item) => item.id === selectedMatch?.tournament_id) ?? null;
+  const tournamentForMatch = selectedTournament ?? manualTournaments.find((item) => item.id === selectedMatch?.tournament_id) ?? null;
   const mobileBackAction =
     screen === "match"
       ? {
@@ -108,13 +109,17 @@ export function AdminPanel() {
 
   const renderScreen = () => {
     if (screen === "roster") {
-      return <PlayerRosterScreen players={players.data} tournaments={tournaments.data} matches={matches.data} onDone={setMessage} />;
+      return <PlayerRosterScreen players={players.data} tournaments={manualTournaments} matches={matches.data} onDone={setMessage} />;
+    }
+
+    if (screen === "lichess-sync") {
+      return <LichesSyncScreen onDone={setMessage} />;
     }
 
     if (screen === "tournaments") {
       return (
         <TournamentLibraryScreen
-          tournaments={tournaments.data}
+          tournaments={manualTournaments}
           onDone={setMessage}
           onOpenTournament={(tournamentId) => {
             setSelectedTournamentId(tournamentId);
@@ -208,6 +213,11 @@ export function AdminPanel() {
           label="Tournament Library"
           active={screen === "tournaments" || screen === "tournament" || screen === "match"}
           onClick={() => setScreen("tournaments")}
+        />
+        <NavButton
+          label="Lichess Sync"
+          active={screen === "lichess-sync"}
+          onClick={() => setScreen("lichess-sync")}
         />
       </div>
 
@@ -1654,4 +1664,296 @@ function syncStagesToRoundCount(stages: TournamentStage[], rounds: number) {
 
 function getStageName(tournament: Tournament, stageId: string) {
   return tournament.stages.find((stage) => stage.id === stageId)?.name ?? "Stage";
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lichess Sync Registry Screen                                                */
+/* -------------------------------------------------------------------------- */
+
+type SyncStatus = "idle" | "loading" | "saving" | "syncing" | "done" | "error";
+
+type SyncResult = {
+  tournamentsProcessed: number;
+  gamesProcessed: number;
+  errors: string[];
+  tournamentIds: string[];
+};
+
+function LichesSyncScreen({ onDone }: { onDone: (message: string) => void }) {
+  const [status, setStatus] = useState<SyncStatus>("loading");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [tournamentIds, setTournamentIds] = useState<string[]>([]);
+  const [creatorUsernames, setCreatorUsernames] = useState<string[]>([]);
+  const [newTournamentId, setNewTournamentId] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const auth = useAuthUser();
+
+  async function getIdToken() {
+    const user = auth.user;
+    if (!user) throw new Error("Not authenticated");
+    const { getIdToken: getToken } = await import("firebase/auth");
+    return getToken(user, /* forceRefresh */ false);
+  }
+
+  // Load registry on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getIdToken();
+        const response = await fetch("/api/admin/lichess-registry", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as { tournamentIds: string[]; creatorUsernames: string[] };
+        if (!cancelled) {
+          setTournamentIds(data.tournamentIds ?? []);
+          setCreatorUsernames(data.creatorUsernames ?? []);
+          setStatus("idle");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMsg(error instanceof Error ? error.message : "Failed to load registry.");
+          setStatus("error");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function saveRegistry() {
+    setStatus("saving");
+    setErrorMsg(null);
+    try {
+      const token = await getIdToken();
+      const response = await fetch("/api/admin/lichess-registry", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tournamentIds, creatorUsernames })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setStatus("idle");
+      onDone("Lichess sync registry saved.");
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "Failed to save registry.");
+      setStatus("error");
+    }
+  }
+
+  async function runSync() {
+    setStatus("syncing");
+    setErrorMsg(null);
+    setSyncResult(null);
+    try {
+      const cronSecret = process.env.NEXT_PUBLIC_CRON_TEST_SECRET;
+      const headers: Record<string, string> = {};
+      if (cronSecret) headers.Authorization = `Bearer ${cronSecret}`;
+      const response = await fetch("/api/cron/lichess-sync", {
+        method: "GET",
+        headers
+      });
+      const data = await response.json() as SyncResult & { error?: string };
+      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setSyncResult(data);
+      setStatus("done");
+      onDone(`Sync complete — ${data.tournamentsProcessed} tournaments, ${data.gamesProcessed} games.`);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "Sync failed.");
+      setStatus("error");
+    }
+  }
+
+  const isBusy = status === "loading" || status === "saving" || status === "syncing";
+
+  return (
+    <section className="space-y-6">
+      <section className="border border-neutral-800 bg-surface-container p-5">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant">Lichess Integration</p>
+        <h2 className="mt-2 font-serif text-3xl text-on-surface">Lichess Sync Registry</h2>
+        <p className="mt-2 text-sm text-on-surface-variant">
+          Configure which Lichess tournaments get mirrored into Firestore. Add creator usernames to auto-discover all
+          their tournaments, or seed specific tournament IDs directly. Sync runs automatically every 10 minutes on
+          Vercel, or trigger it manually below.
+        </p>
+      </section>
+
+      {/* Error banner */}
+      {errorMsg && status === "error" ? (
+        <p className="border border-error-container bg-error-container/20 p-3 text-sm text-error">{errorMsg}</p>
+      ) : null}
+
+      {/* Creator Usernames */}
+      <section className="border border-neutral-800 bg-surface-container p-5">
+        <h3 className="font-serif text-2xl text-on-surface">Creator Usernames</h3>
+        <p className="mt-1 text-sm text-on-surface-variant">
+          All tournaments created by these Lichess usernames are automatically discovered and synced.
+        </p>
+        <div className="mt-4 flex gap-2">
+          <TextInput
+            label="Lichess username"
+            value={newUsername}
+            onChange={setNewUsername}
+            placeholder="e.g. endgamesociety"
+          />
+          <button
+            type="button"
+            disabled={isBusy || !newUsername.trim()}
+            onClick={() => {
+              const username = newUsername.trim().toLowerCase();
+              if (username && !creatorUsernames.includes(username)) {
+                setCreatorUsernames((prev) => [...prev, username]);
+              }
+              setNewUsername("");
+            }}
+            className="mt-5 min-h-12 shrink-0 border border-primary px-4 text-xs font-bold uppercase tracking-[0.16em] text-primary disabled:opacity-50"
+          >
+            Add
+          </button>
+        </div>
+        {creatorUsernames.length === 0 ? (
+          <p className="mt-4 text-sm text-on-surface-variant">No creator usernames configured.</p>
+        ) : (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {creatorUsernames.map((username) => (
+              <div key={username} className="flex items-center gap-2 border border-neutral-700 bg-surface-container-low px-3 py-2">
+                <span className="text-sm text-on-surface">@{username}</span>
+                <button
+                  type="button"
+                  onClick={() => setCreatorUsernames((prev) => prev.filter((u) => u !== username))}
+                  className="text-xs font-bold text-error hover:text-error/80"
+                  aria-label={`Remove ${username}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Tournament IDs */}
+      <section className="border border-neutral-800 bg-surface-container p-5">
+        <h3 className="font-serif text-2xl text-on-surface">Specific Tournament IDs</h3>
+        <p className="mt-1 text-sm text-on-surface-variant">
+          Seed specific Lichess tournament IDs (the short alphanumeric ID from the URL, e.g.{" "}
+          <code className="rounded bg-surface-dim px-1 py-0.5 font-mono text-xs">ABC123</code>).
+        </p>
+        <div className="mt-4 flex gap-2">
+          <TextInput
+            label="Lichess tournament ID"
+            value={newTournamentId}
+            onChange={setNewTournamentId}
+            placeholder="e.g. qrSGvFZH"
+          />
+          <button
+            type="button"
+            disabled={isBusy || !newTournamentId.trim()}
+            onClick={() => {
+              const id = newTournamentId.trim();
+              if (id && !tournamentIds.includes(id)) {
+                setTournamentIds((prev) => [...prev, id]);
+              }
+              setNewTournamentId("");
+            }}
+            className="mt-5 min-h-12 shrink-0 border border-primary px-4 text-xs font-bold uppercase tracking-[0.16em] text-primary disabled:opacity-50"
+          >
+            Add
+          </button>
+        </div>
+        {tournamentIds.length === 0 ? (
+          <p className="mt-4 text-sm text-on-surface-variant">No specific tournament IDs configured.</p>
+        ) : (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {tournamentIds.map((id) => (
+              <div key={id} className="flex items-center gap-2 border border-neutral-700 bg-surface-container-low px-3 py-2">
+                <span className="font-mono text-sm text-on-surface">{id}</span>
+                <a
+                  href={`https://lichess.org/tournament/${id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline"
+                >
+                  ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setTournamentIds((prev) => prev.filter((t) => t !== id))}
+                  className="text-xs font-bold text-error hover:text-error/80"
+                  aria-label={`Remove ${id}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Save button */}
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={saveRegistry}
+          className="min-h-12 bg-primary px-6 text-xs font-bold uppercase tracking-[0.2em] text-on-primary disabled:opacity-50"
+        >
+          {status === "saving" ? "Saving…" : "Save registry"}
+        </button>
+        <p className="text-xs text-on-surface-variant">Registry is stored in Firestore and merged with env vars at sync time.</p>
+      </div>
+
+      {/* Run Sync Now */}
+      <section className="border border-primary/30 bg-primary/5 p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="font-serif text-2xl text-primary">Run Sync Now</h3>
+            <p className="mt-1 text-sm text-on-surface-variant">
+              Manually trigger a full Lichess sync. This pulls all registered tournaments, updates standings, and stores
+              new games. Note: requires <code className="font-mono text-xs">CRON_SECRET</code> set in env as{" "}
+              <code className="font-mono text-xs">NEXT_PUBLIC_CRON_TEST_SECRET</code> to work in the browser.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={runSync}
+            className="shrink-0 min-h-12 border border-primary px-6 text-xs font-bold uppercase tracking-[0.2em] text-primary disabled:opacity-50"
+          >
+            {status === "syncing" ? (
+              <span className="flex items-center gap-2">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                Syncing…
+              </span>
+            ) : (
+              "Run sync now"
+            )}
+          </button>
+        </div>
+
+        {/* Sync result */}
+        {syncResult && status === "done" ? (
+          <div className="mt-4 border border-primary/20 bg-surface-container-low p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Last sync result</p>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StaticMetric label="Tournaments" value={String(syncResult.tournamentsProcessed)} />
+              <StaticMetric label="Games synced" value={String(syncResult.gamesProcessed)} />
+              <StaticMetric label="IDs resolved" value={String(syncResult.tournamentIds?.length ?? 0)} />
+              <StaticMetric label="Errors" value={String(syncResult.errors?.length ?? 0)} />
+            </div>
+            {syncResult.errors?.length > 0 ? (
+              <div className="mt-3 space-y-1">
+                {syncResult.errors.map((error, index) => (
+                  <p key={index} className="text-xs text-error">
+                    {error}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+    </section>
+  );
 }

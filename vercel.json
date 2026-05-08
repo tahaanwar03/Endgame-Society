@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/lichess-sync",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}

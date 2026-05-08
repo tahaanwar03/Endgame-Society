@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
-import { useMatch, usePlayers } from "@/lib/firestore-hooks";
+import { useGame, useMatch, usePlayers } from "@/lib/firestore-hooks";
 import { getPlayerName } from "@/lib/standings";
 
 const Chessboard = dynamic(() => import("react-chessboard").then((mod) => mod.Chessboard), {
@@ -62,11 +62,14 @@ function fenAtPly(moves: string[], ply: number) {
 
 export function MatchViewer({ matchId }: { matchId: string }) {
   const matchState = useMatch(matchId);
+  const gameState = useGame(matchId);
   const players = usePlayers();
   const { ref, width } = useBoardWidth();
   const [ply, setPly] = useState(0);
 
-  const pgn = matchState.data?.pgn ?? "";
+  const manualMatch = matchState.data;
+  const lichessGame = !manualMatch ? gameState.data : null;
+  const pgn = manualMatch?.pgn ?? lichessGame?.movesPgn ?? "";
   const parsed = useMemo(() => parsePgn(pgn), [pgn]);
   const fen = useMemo(() => fenAtPly(parsed.moves, ply), [parsed.moves, ply]);
 
@@ -74,7 +77,7 @@ export function MatchViewer({ matchId }: { matchId: string }) {
     setPly(0);
   }, [pgn]);
 
-  if (matchState.loading || players.loading) {
+  if (matchState.loading || gameState.loading || (manualMatch ? players.loading : false)) {
     return (
       <main className="mx-auto max-w-container px-4 py-8 md:px-8">
         <LoadingState label="Loading match" />
@@ -82,7 +85,7 @@ export function MatchViewer({ matchId }: { matchId: string }) {
     );
   }
 
-  const error = matchState.error || players.error;
+  const error = matchState.error || gameState.error || players.error;
 
   if (error) {
     return (
@@ -92,9 +95,10 @@ export function MatchViewer({ matchId }: { matchId: string }) {
     );
   }
 
-  const match = matchState.data;
+  const match = manualMatch;
+  const game = lichessGame;
 
-  if (!match) {
+  if (!match && !game) {
     return (
       <main className="mx-auto max-w-container px-4 py-8 md:px-8">
         <EmptyState title="Match not found" detail="This match may have been removed or not published yet." />
@@ -102,8 +106,8 @@ export function MatchViewer({ matchId }: { matchId: string }) {
     );
   }
 
-  const whiteName = !match.player1_id ? "TBD" : getPlayerName(players.data, match.player1_id);
-  const blackName = !match.player2_id ? "TBD" : getPlayerName(players.data, match.player2_id);
+  const whiteName = match ? (!match.player1_id ? "TBD" : getPlayerName(players.data, match.player1_id)) : game!.white;
+  const blackName = match ? (!match.player2_id ? "TBD" : getPlayerName(players.data, match.player2_id)) : game!.black;
   const movePairs = Array.from({ length: Math.ceil(parsed.moves.length / 2) }, (_, index) => ({
     number: index + 1,
     white: parsed.moves[index * 2],
@@ -113,16 +117,18 @@ export function MatchViewer({ matchId }: { matchId: string }) {
   return (
     <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
       <section className="mb-8 border-b border-outline-variant pb-6">
-        <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant">Round {match.round}</p>
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-on-surface-variant">
+          {match ? `Round ${match.round}` : "Lichess archive"}
+        </p>
         <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-center">
           <h1 className="font-serif text-3xl text-primary">{whiteName}</h1>
-          <div className="text-center font-serif text-5xl text-on-surface">{match.result ?? "vs"}</div>
+          <div className="text-center font-serif text-5xl text-on-surface">{match?.result ?? game?.result ?? "vs"}</div>
           <h2 className="font-serif text-3xl text-on-surface md:text-right">{blackName}</h2>
         </div>
       </section>
 
       {!pgn.trim() ? (
-        <EmptyState title="No game data available" detail="Admin can add PGN for this match from the admin panel." />
+        <EmptyState title="No game data available" detail={match ? "Admin can add PGN for this match from the admin panel." : "The sync engine has not mirrored PGN for this game yet."} />
       ) : parsed.error ? (
         <EmptyState title="Invalid PGN" detail={parsed.error} />
       ) : (

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useMatches, usePlayers, useTournaments } from "@/lib/firestore-hooks";
+import { useGames, useMatches, usePlayers, useTournaments } from "@/lib/firestore-hooks";
 import {
   buildStandingsByGroup,
   getPlayerName,
@@ -31,8 +31,9 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
   const tournaments = useTournaments();
   const players = usePlayers();
   const matches = useMatches(tournamentId);
+  const games = useGames(tournamentId);
 
-  if (tournaments.loading || players.loading || matches.loading) {
+  if (tournaments.loading || players.loading || matches.loading || games.loading) {
     return (
       <main className="mx-auto max-w-container px-4 py-8 md:px-8">
         <LoadingState label="Loading tournament" />
@@ -40,7 +41,7 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
     );
   }
 
-  const error = tournaments.error || players.error || matches.error;
+  const error = tournaments.error || players.error || matches.error || games.error;
 
   if (error) {
     return (
@@ -58,6 +59,10 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
         <EmptyState title="Tournament not found" detail="This tournament may have been removed or not published yet." />
       </main>
     );
+  }
+
+  if (tournament.source === "lichess") {
+    return <LichessTournamentDashboard tournament={tournament} games={games.data} tab={tab} setTab={setTab} />;
   }
 
   const stageSections = groupMatchesByStage(tournament, matches.data);
@@ -263,6 +268,142 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                 )}
               </div>
             </>
+          )}
+        </section>
+      ) : null}
+    </main>
+  );
+}
+
+function LichessTournamentDashboard({
+  tournament,
+  games,
+  tab,
+  setTab
+}: {
+  tournament: ReturnType<typeof useTournaments>["data"][number];
+  games: ReturnType<typeof useGames>["data"];
+  tab: Tab;
+  setTab: (tab: Tab) => void;
+}) {
+  const playerCount = tournament.standings.length;
+  const clockLabel = tournament.clock ? `${Math.floor(tournament.clock.limit / 60)}+${tournament.clock.increment}` : "Unspecified";
+
+  return (
+    <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
+      <section className="mb-8 border-l-2 border-primary pl-4">
+        <Link
+          href="/tournaments"
+          className="mb-4 inline-flex min-h-10 items-center border border-neutral-700 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant transition hover:border-primary hover:text-primary"
+        >
+          Back to tournaments
+        </Link>
+        <div className="mb-3 flex items-center gap-3">
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Lichess Tournament Mirror</p>
+          <StatusBadge status={tournament.status} />
+        </div>
+        <h1 className="font-serif text-[2.1rem] leading-tight text-on-surface md:text-4xl">{tournament.name}</h1>
+        <p className="mt-2 text-sm text-neutral-500">{tournament.date || "Unscheduled"}</p>
+        <div className="mt-4 grid grid-cols-3 gap-2 md:hidden">
+          <SummaryChip label="Players" value={String(playerCount)} />
+          <SummaryChip label="Clock" value={clockLabel} />
+          <SummaryChip label="Games" value={String(games.length)} />
+        </div>
+      </section>
+
+      <div className="sticky top-16 z-20 mb-6 flex border-b border-neutral-800 bg-[#131313]">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setTab(item.id)}
+            className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] md:min-h-12 md:text-xs md:tracking-[0.18em] ${
+              tab === item.id ? "border-b-2 border-primary text-primary" : "text-neutral-500"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "standings" ? (
+        <section className="overflow-hidden border border-neutral-800 bg-surface-container-low">
+          <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
+            Live standings snapshot
+          </h2>
+          {tournament.standings.length === 0 ? (
+            <p className="p-6 text-sm text-on-surface-variant">No standings snapshot has been synced yet.</p>
+          ) : (
+            <div className="overflow-hidden">
+              <table className="w-full table-fixed text-left text-[11px] md:text-sm">
+                <thead className="bg-neutral-900 text-[9px] uppercase tracking-[0.12em] text-on-surface-variant md:text-[10px] md:tracking-[0.18em]">
+                  <tr>
+                    <th className="w-[14%] px-2 py-3 text-center md:px-4 md:py-4">Rk</th>
+                    <th className="w-[56%] px-2 py-3 md:px-4 md:py-4">Player</th>
+                    <th className="w-[30%] px-2 py-3 text-right md:px-4 md:py-4">Score</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-900">
+                  {tournament.standings.map((standing) => (
+                    <tr key={standing.userId} className="zebra-row">
+                      <td className="px-2 py-3 text-center font-bold text-primary md:px-4 md:py-4">{standing.rank}</td>
+                      <td className="px-2 py-3 font-semibold leading-tight md:px-4 md:py-4">
+                        <span className="block truncate">{standing.username}</span>
+                      </td>
+                      <td className="px-2 py-3 text-right font-bold text-primary md:px-4 md:py-4">{standing.score}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "fixtures" ? (
+        <section className="border border-neutral-800 bg-surface-container-low">
+          <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
+            Archived games
+          </h2>
+          {games.length === 0 ? (
+            <p className="p-6 text-sm text-on-surface-variant">No finished games have been mirrored yet.</p>
+          ) : (
+            <div className="divide-y divide-neutral-900">
+              {games.map((game) => (
+                <Link
+                  key={game.id}
+                  href={`/match/${game.id}`}
+                  className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
+                >
+                  <span className="min-w-0 truncate">
+                    {game.white} vs {game.black}
+                  </span>
+                  <span className="text-xs font-bold text-primary md:text-sm">{game.result}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "players" ? (
+        <section className="border border-neutral-800 bg-surface-container-low">
+          <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
+            Participants
+          </h2>
+          {tournament.standings.length === 0 ? (
+            <p className="p-6 text-sm text-on-surface-variant">No participant snapshot has been synced yet.</p>
+          ) : (
+            <div className="grid gap-px bg-neutral-900 md:grid-cols-2">
+              {tournament.standings.map((standing) => (
+                <div key={standing.userId} className="bg-surface-container-low px-4 py-4 text-sm">
+                  <p className="font-semibold text-on-surface">{standing.username}</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.16em] text-on-surface-variant">
+                    Rank {standing.rank} · Score {standing.score}
+                  </p>
+                </div>
+              ))}
+            </div>
           )}
         </section>
       ) : null}

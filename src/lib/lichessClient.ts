@@ -1,0 +1,263 @@
+import "server-only";
+
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+type LichessTournamentApiResponse = {
+  id?: string;
+  fullName?: string;
+  createdBy?: string;
+  minutes?: number;
+  clock?: { limit?: number; increment?: number };
+  startsAt?: number;
+  finishesAt?: number;
+  createdAt?: number;
+  isFinished?: boolean;
+  isStarted?: boolean;
+  nbPlayers?: number;
+};
+
+type LichessResultApiResponse = {
+  rank?: number;
+  score?: number;
+  username?: string;
+};
+
+type LichessGameApiResponse = {
+  id?: string;
+  createdAt?: number;
+  players?: {
+    white?: { user?: { name?: string } };
+    black?: { user?: { name?: string } };
+  };
+};
+
+type LichessCreatedTournamentApiResponse = {
+  id?: string;
+  fullName?: string;
+  startsAt?: number;
+  finishesAt?: number;
+  isFinished?: boolean;
+  isStarted?: boolean;
+};
+
+export type LichessTournamentSummary = {
+  lichessId: string;
+  name: string;
+  status: "created" | "ongoing" | "finished";
+  createdAt: Date;
+  startedAt?: Date;
+  endedAt?: Date;
+  clock: {
+    limit: number;
+    increment: number;
+  };
+};
+
+export type LichessStandingEntry = {
+  userId: string;
+  username: string;
+  score: number;
+  rank: number;
+};
+
+export type LichessTournamentGame = {
+  gameId: string;
+  white: string;
+  black: string;
+  createdAt?: Date;
+};
+
+const API_BASE = "https://lichess.org";
+const MAX_ATTEMPTS = 3;
+
+function getToken() {
+  const token = process.env.LICHESS_API_TOKEN;
+
+  if (!token) {
+    throw new Error("LICHESS_API_TOKEN is not configured.");
+  }
+
+  return token;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(path: string, init?: RequestInit) {
+  const token = getToken();
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          ...(init?.headers ?? {})
+        },
+        cache: "no-store"
+      });
+
+      if (response.status === 404) {
+        return response;
+      }
+
+      if (response.ok) {
+        return response;
+      }
+
+      if (response.status === 429 && attempt < MAX_ATTEMPTS) {
+        const retryAfter = Number(response.headers.get("retry-after") ?? "");
+        await delay(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 60_000);
+        continue;
+      }
+
+      if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
+        await delay(500 * 2 ** (attempt - 1));
+        continue;
+      }
+
+      throw new Error(`Lichess request failed: ${response.status} ${response.statusText} (${path})`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown Lichess request failure.");
+
+      if (attempt < MAX_ATTEMPTS) {
+        await delay(500 * 2 ** (attempt - 1));
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error(`Lichess request failed: ${path}`);
+}
+
+async function fetchJson<T extends JsonValue>(path: string) {
+  const response = await fetchWithRetry(path);
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  return (await response.json()) as T;
+}
+
+async function fetchText(path: string, accept = "text/plain") {
+  const response = await fetchWithRetry(path, {
+    headers: {
+      Accept: accept
+    }
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  return response.text();
+}
+
+function parseNdjson<T>(input: string | null) {
+  if (!input) {
+    return [] as T[];
+  }
+
+  return input
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as T);
+}
+
+function normalizeTournamentStatus(data: LichessTournamentApiResponse): LichessTournamentSummary["status"] {
+  if (data.isFinished) {
+    return "finished";
+  }
+
+  if (data.isStarted) {
+    return "ongoing";
+  }
+
+  return "created";
+}
+
+function asDate(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? new Date(value) : undefined;
+}
+
+export async function fetchTournamentData(tournamentId: string) {
+  const data = await fetchJson<LichessTournamentApiResponse>(`/api/tournament/${tournamentId}`);
+
+  if (!data?.id || !data.fullName) {
+    return null;
+  }
+
+  return {
+    lichessId: data.id,
+    name: data.fullName,
+    status: normalizeTournamentStatus(data),
+    createdAt: asDate(data.createdAt) ?? new Date(),
+    startedAt: asDate(data.startsAt),
+    endedAt: asDate(data.finishesAt),
+    clock: {
+      limit: typeof data.clock?.limit === "number" ? data.clock.limit : 0,
+      increment: typeof data.clock?.increment === "number" ? data.clock.increment : 0
+    }
+  } satisfies LichessTournamentSummary;
+}
+
+export async function fetchTournamentResults(tournamentId: string) {
+  const text = await fetchText(`/api/tournament/${tournamentId}/results`, "application/x-ndjson");
+  const parsed = parseNdjson<LichessResultApiResponse>(text);
+
+  return parsed
+    .filter((entry) => entry.username)
+    .map((entry) => ({
+      userId: entry.username!.toLowerCase(),
+      username: entry.username!,
+      score: typeof entry.score === "number" ? entry.score : 0,
+      rank: typeof entry.rank === "number" ? entry.rank : 0
+    }))
+    .sort((a, b) => a.rank - b.rank) satisfies LichessStandingEntry[];
+}
+
+export async function fetchTournamentGames(tournamentId: string) {
+  const text = await fetchText(
+    `/api/tournament/${tournamentId}/games?moves=false&clocks=false&evals=false&opening=false&pgnInJson=false`,
+    "application/x-ndjson"
+  );
+  const parsed = parseNdjson<LichessGameApiResponse>(text);
+
+  return parsed
+    .filter((entry) => entry.id)
+    .map((entry) => ({
+      gameId: entry.id!,
+      white: entry.players?.white?.user?.name ?? "White",
+      black: entry.players?.black?.user?.name ?? "Black",
+      createdAt: asDate(entry.createdAt)
+    }))
+    .filter((entry) => entry.white && entry.black) satisfies LichessTournamentGame[];
+}
+
+export async function fetchGamePgn(gameId: string) {
+  return fetchText(`/game/export/${gameId}`, "application/x-chess-pgn");
+}
+
+export async function fetchUserGames(username: string) {
+  return fetchText(`/api/games/user/${encodeURIComponent(username)}`, "application/x-ndjson");
+}
+
+export async function fetchUserCreatedTournaments(username: string) {
+  const text = await fetchText(`/api/user/${encodeURIComponent(username)}/tournament/created`, "application/x-ndjson");
+  const parsed = parseNdjson<LichessCreatedTournamentApiResponse>(text);
+
+  return parsed
+    .filter((entry) => entry.id && entry.fullName)
+    .map((entry) => ({
+      lichessId: entry.id!,
+      name: entry.fullName!,
+      status: entry.isFinished ? "finished" : entry.isStarted ? "ongoing" : "created",
+      startedAt: asDate(entry.startsAt),
+      endedAt: asDate(entry.finishesAt)
+    }));
+}
