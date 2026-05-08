@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const FRAME_COUNT = 68;
-const PRELOAD_RADIUS = 6; // load a small window around the current frame for smooth scrub
 
 function framePath(index: number) {
   return `/frames/frame_${String(index).padStart(4, "0")}.webp`;
@@ -16,6 +15,8 @@ export function HeroFrameSequence() {
   const introRef = useRef<HTMLDivElement | null>(null);
   const messagingRef = useRef<HTMLDivElement | null>(null);
   const footerRef = useRef<HTMLDivElement | null>(null);
+  
+  const [isCanvasReady, setIsCanvasReady] = useState(false);
 
   useEffect(() => {
     let cleanup = () => {};
@@ -30,7 +31,7 @@ export function HeroFrameSequence() {
       return cleanup;
     }
 
-    const context = canvas.getContext("2d");
+    const context = canvas.getContext("2d", { alpha: false }); // Optimize for opaque frames
 
     if (!context) {
       return cleanup;
@@ -38,105 +39,102 @@ export function HeroFrameSequence() {
 
     let active = true;
     const state = { frame: reducedMotion ? FRAME_COUNT - 1 : 0 };
-    const images: Array<HTMLImageElement | null> = Array.from({ length: FRAME_COUNT }, () => null);
-    const decodePromises: Array<Promise<void> | null> = Array.from({ length: FRAME_COUNT }, () => null);
+    const images: Array<HTMLImageElement> = [];
+    const PRELOAD_BATCH_SIZE = 12;
+    
     let lastFrameDrawn = -1;
     let drawQueued = false;
     let cssWidth = 0;
     let cssHeight = 0;
 
     const resize = () => {
-      // High DPR canvas is expensive for scroll-scrubbed redraws; cap it.
-      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+      // Mobile adaptive DPR: Cap at 1.0 for small screens, 1.5 for desktop to balance quality/speed
+      const isMobile = window.innerWidth < 768;
+      const ratio = Math.min(window.devicePixelRatio || 1, isMobile ? 1.0 : 1.5);
+      
       cssWidth = section.clientWidth;
       cssHeight = section.clientHeight;
+      
       canvas.width = Math.max(1, Math.floor(cssWidth * ratio));
       canvas.height = Math.max(1, Math.floor(cssHeight * ratio));
       canvas.style.width = `${cssWidth}px`;
       canvas.style.height = `${cssHeight}px`;
+      
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       scheduleDraw();
     };
 
-    const ensureFrameLoaded = (frameIndex: number) => {
-      if (frameIndex < 0 || frameIndex >= FRAME_COUNT) {
-        return;
-      }
-      if (images[frameIndex]) {
-        return;
-      }
-
-      const image = new Image();
-      // Hint to decode off the main thread where possible.
-      (image as any).decoding = "async";
-      image.src = framePath(frameIndex + 1);
-      image.onload = () => scheduleDraw();
-      images[frameIndex] = image;
-
-      if (!decodePromises[frameIndex]) {
-        const decode = image.decode ? image.decode().then(() => undefined).catch(() => undefined) : Promise.resolve();
-        decodePromises[frameIndex] = decode;
-      }
+    const loadFrame = (index: number): Promise<HTMLImageElement> => {
+      return new Promise((resolve) => {
+        if (images[index]) return resolve(images[index]);
+        const img = new Image();
+        img.src = framePath(index + 1);
+        (img as any).decoding = "async";
+        img.onload = () => {
+          images[index] = img;
+          resolve(img);
+        };
+      });
     };
 
-    const maybePreloadAround = (frameIndex: number) => {
-      ensureFrameLoaded(frameIndex);
-      for (let i = 1; i <= PRELOAD_RADIUS; i++) {
-        ensureFrameLoaded(frameIndex - i);
-        ensureFrameLoaded(frameIndex + i);
+    const preloadSequence = async () => {
+      // Prioritize the first frame and immediate neighbors
+      await loadFrame(0);
+      scheduleDraw();
+      
+      if (reducedMotion) return;
+
+      // Load in batches to avoid blocking the network/main thread entirely
+      for (let i = 1; i < FRAME_COUNT; i += PRELOAD_BATCH_SIZE) {
+        if (!active) break;
+        const batch = [];
+        for (let j = 0; j < PRELOAD_BATCH_SIZE && (i + j) < FRAME_COUNT; j++) {
+           batch.push(loadFrame(i + j));
+        }
+        await Promise.all(batch);
       }
     };
 
     const draw = () => {
       const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
+      const image = images[frameIndex];
+
+      if (!image || !image.complete) {
+        return;
+      }
+
       if (frameIndex === lastFrameDrawn && !reducedMotion) {
         return;
       }
+      
       lastFrameDrawn = frameIndex;
 
-      const image = images[frameIndex];
+      const scale = Math.max(cssWidth / image.naturalWidth, cssHeight / image.naturalHeight);
+      const x = (cssWidth - image.naturalWidth * scale) / 2;
+      const y = (cssHeight - image.naturalHeight * scale) / 2;
 
-      if (!image?.complete) {
-        // If we haven't loaded this frame yet, kick off a small preload window.
-        maybePreloadAround(frameIndex);
-        return;
-      }
-
-      const width = cssWidth;
-      const height = cssHeight;
-      const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
-      const x = (width - image.naturalWidth * scale) / 2;
-      const y = (height - image.naturalHeight * scale) / 2;
-
-      context.clearRect(0, 0, cssWidth, cssHeight);
-      // Keep filter work minimal; blur in particular is expensive per-frame.
-      // Brightness provides the "assembly glow" without blowing up scroll perf.
-      const glow = 0.68 + (frameIndex / (FRAME_COUNT - 1)) * 0.18;
-      context.filter = `brightness(${glow})`;
       context.drawImage(image, x, y, image.naturalWidth * scale, image.naturalHeight * scale);
-      context.filter = "none";
+      
+      // Notify UI that we've successfully painted at least one frame
+      if (!isCanvasReady) {
+        setIsCanvasReady(true);
+      }
     };
 
     const scheduleDraw = () => {
-      if (drawQueued) {
-        return;
-      }
+      if (drawQueued) return;
       drawQueued = true;
       requestAnimationFrame(() => {
         drawQueued = false;
-        if (!active) {
-          return;
-        }
-        draw();
+        if (active) draw();
       });
     };
 
     resize();
     window.addEventListener("resize", resize);
+    preloadSequence();
 
     if (reducedMotion) {
-      // Ensure final frame is at least requested; we still show static content.
-      ensureFrameLoaded(FRAME_COUNT - 1);
       intro.style.opacity = "1";
       intro.style.transform = "translateY(0)";
       messaging.style.opacity = "0";
@@ -147,19 +145,11 @@ export function HeroFrameSequence() {
         active = false;
         window.removeEventListener("resize", resize);
       };
-
       return cleanup;
     }
 
-    // Load the first frame immediately for fast paint, and start a small preload window.
-    ensureFrameLoaded(0);
-    maybePreloadAround(0);
-
-    // Give the browser a moment to paint the first frame before importing GSAP.
     const startGsap = async () => {
-      if (!active) {
-        return;
-      }
+      if (!active) return;
 
       const gsap = (await import("gsap")).default;
       const { ScrollTrigger } = await import("gsap/ScrollTrigger");
@@ -173,21 +163,12 @@ export function HeroFrameSequence() {
         scrollTrigger: {
           trigger: section,
           start: "top top",
-          end: "+=220%",
-          scrub: 0.35,
+          end: "+=250%", 
+          scrub: 0.15,   
           pin: true,
           anticipatePin: 1,
           invalidateOnRefresh: true,
-          onUpdate: () => {
-            const frameIndex = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(state.frame)));
-            // Keep a small decode window around the current frame.
-            // Use idle callback when possible to reduce main-thread contention.
-            if ("requestIdleCallback" in window) {
-              (window as any).requestIdleCallback(() => maybePreloadAround(frameIndex), { timeout: 120 });
-            } else {
-              maybePreloadAround(frameIndex);
-            }
-          }
+          fastScrollEnd: true
         }
       });
 
@@ -202,47 +183,19 @@ export function HeroFrameSequence() {
         0
       );
 
+      // Map the frame index to a CSS brightness filter and assembly glow
+      // We do this on the element style instead of canvas context for speed
+      timeline.to(canvas, {
+        filter: "brightness(0.86)",
+        ease: "power1.inOut",
+        duration: 1
+      }, 0);
+
       timeline
-        .to(
-          intro,
-          {
-            opacity: 0,
-            y: -28,
-            ease: "power2.out",
-            duration: 0.16
-          },
-          0.14
-        )
-        .to(
-          messaging,
-          {
-            opacity: 1,
-            y: 0,
-            ease: "power2.out",
-            duration: 0.18
-          },
-          0.28
-        )
-        .to(
-          messaging,
-          {
-            opacity: 0,
-            y: -20,
-            ease: "power2.out",
-            duration: 0.16
-          },
-          0.62
-        )
-        .to(
-          footer,
-          {
-            opacity: 1,
-            y: 0,
-            ease: "power2.out",
-            duration: 0.18
-          },
-          0.78
-        );
+        .to(intro, { opacity: 0, y: -28, ease: "power2.out", duration: 0.16 }, 0.14)
+        .to(messaging, { opacity: 1, y: 0, ease: "power2.out", duration: 0.18 }, 0.28)
+        .to(messaging, { opacity: 0, y: -20, ease: "power2.out", duration: 0.16 }, 0.62)
+        .to(footer, { opacity: 1, y: 0, ease: "power2.out", duration: 0.18 }, 0.78);
 
       cleanup = () => {
         active = false;
@@ -252,28 +205,32 @@ export function HeroFrameSequence() {
       };
     };
 
-    // Start GSAP on the next tick to let the first frame paint.
     queueMicrotask(() => {
-      if (!active) return;
-      startGsap().catch(() => {
-        // If GSAP fails to import, we still keep the static first frame.
-      });
+      if (active) startGsap().catch(() => {});
     });
 
     return () => cleanup();
-  }, []);
+  }, [isCanvasReady]);
 
   return (
     <section ref={sectionRef} className="relative h-screen min-h-[760px] w-full overflow-hidden bg-black">
-      <picture>
+      {/* Smart Hand-off Poster: Fades out once the canvas sequence is ready */}
+      <picture className={`transition-opacity duration-1000 ${isCanvasReady ? "opacity-0 pointer-events-none" : "opacity-75"}`}>
         <source srcSet="/hero-poster.webp" type="image/webp" />
         <img
           src="/hero-poster.webp"
           alt=""
-          className="absolute inset-0 z-0 h-full w-full object-cover object-center opacity-75"
+          className="absolute inset-0 z-0 h-full w-full object-cover object-center"
         />
       </picture>
-      <canvas ref={canvasRef} className="absolute inset-0 z-10 h-full w-full" aria-hidden="true" />
+      
+      <canvas 
+        ref={canvasRef} 
+        className="absolute inset-0 z-10 h-full w-full transition-filter duration-300" 
+        style={{ filter: "brightness(0.68)" }} // Starting brightness
+        aria-hidden="true" 
+      />
+      
       <div className="absolute inset-0 z-20 bg-[radial-gradient(circle_at_top,rgba(164,121,72,0.16),transparent_30%),radial-gradient(circle_at_center,rgba(219,164,88,0.08),transparent_28%),linear-gradient(180deg,rgba(0,0,0,0.48)_0%,rgba(0,0,0,0.22)_42%,rgba(7,7,7,0.78)_100%)]" />
       <div className="pointer-events-none absolute inset-0 z-20 bg-[linear-gradient(90deg,rgba(0,0,0,0.28)_0%,transparent_12%,rgba(188,147,95,0.08)_50%,transparent_88%,rgba(0,0,0,0.24)_100%)]" />
       <div className="pointer-events-none absolute inset-0 z-20 opacity-70 [background-image:linear-gradient(rgba(183,146,98,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(183,146,98,0.06)_1px,transparent_1px)] [background-position:center] [background-size:160px_160px]" />
