@@ -785,7 +785,16 @@ function TournamentPlayersForm({
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const assignedPlayers = players.filter((p) => tournament.player_ids.includes(p.id));
   const availablePlayers = players.filter((p) => !tournament.player_ids.includes(p.id));
-  const groups = ["A", "B", "C", "D", "E", "F"];
+  const groups = useMemo(() => {
+    const allGroups = new Set<string>();
+    tournament.stages.forEach(stage => {
+      if (stage.type === "group" && stage.groups) {
+        stage.groups.forEach(g => allGroups.add(g));
+      }
+    });
+    return Array.from(allGroups).sort();
+  }, [tournament.stages]);
+
 
   return (
     <section className="grid gap-12 lg:grid-cols-[1fr_320px]">
