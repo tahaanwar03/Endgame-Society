@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useRef, useMemo, useState, type ReactNode } from "react";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useTournaments } from "@/lib/firestore-hooks";
@@ -25,6 +25,41 @@ function formatClock(tournament: Tournament): string {
   const minutes = Math.floor(tournament.clock.limit / 60);
   const inc = tournament.clock.increment;
   return inc > 0 ? `${minutes}+${inc}` : `${minutes}m`;
+}
+
+function formatDate(dateStr: string | undefined | null): string {
+  if (!dateStr) return "Unscheduled";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/* Very small hook — uses IntersectionObserver to add .in-view class.
+   This triggers the CSS animation-play-state without any scroll listener. */
+function useInViewAnimation(ref: React.RefObject<Element | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { el.classList.add("in-view"); observer.disconnect(); } },
+      { threshold: 0.08 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+}
+
+function AnimatedCard({ children, delay }: { children: ReactNode; delay: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useInViewAnimation(ref as React.RefObject<Element>);
+  return (
+    <div
+      ref={ref}
+      className={`animate-fade-up delay-${delay}`}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function TournamentList() {
@@ -62,88 +97,123 @@ export function TournamentList() {
     return <EmptyState title="No tournaments published" detail="Admin-created tournaments will appear here in real time." />;
   }
 
+  const delays = [0, 60, 120, 180, 240, 300] as const;
+
   return (
     <section>
-      {/* Filter bar */}
-      <div className="mb-8 space-y-6">
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <FilterChip active={sourceFilter === "manual"} onClick={() => { setSourceFilter("manual"); setTimeControlFilter("all"); }}>
+      {/* ── Filter bar ───────────────────────────────────── */}
+      <div className="mb-10 space-y-5">
+        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          {/* Type toggle */}
+          <div className="flex gap-0">
+            <TypeTab active={sourceFilter === "manual"} onClick={() => { setSourceFilter("manual"); setTimeControlFilter("all"); }}>
               Over the Board
-            </FilterChip>
-            <FilterChip active={sourceFilter === "lichess"} onClick={() => setSourceFilter("lichess")}>
+            </TypeTab>
+            <TypeTab active={sourceFilter === "lichess"} onClick={() => setSourceFilter("lichess")}>
               Online
-            </FilterChip>
+            </TypeTab>
           </div>
 
           {/* Sort */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500">Sort</span>
-            {([
-              ["date-desc", "Newest"],
-              ["date-asc", "Oldest"],
-              ["name-asc", "A–Z"],
-              ["status", "Status"]
-            ] as const).map(([mode, label]) => (
-              <FilterChip key={mode} active={sortMode === mode} onClick={() => setSortMode(mode)}>
-                {label}
-              </FilterChip>
+            <span className="mr-1 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-600">Sort</span>
+            {([["date-desc", "Newest"], ["date-asc", "Oldest"], ["name-asc", "A–Z"], ["status", "Status"]] as const).map(([mode, label]) => (
+              <FilterChip key={mode} active={sortMode === mode} onClick={() => setSortMode(mode)}>{label}</FilterChip>
             ))}
           </div>
         </div>
 
-        {/* Format sub-filter (Online only) */}
+        {/* Online format sub-filter */}
         {sourceFilter === "lichess" && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-neutral-900 pt-6">
-            <span className="mr-2 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500">Format</span>
-            <FilterChip active={timeControlFilter === "all"} onClick={() => setTimeControlFilter("all")}>All</FilterChip>
-            <FilterChip active={timeControlFilter === "bullet"} onClick={() => setTimeControlFilter("bullet")}>Bullet</FilterChip>
-            <FilterChip active={timeControlFilter === "blitz"} onClick={() => setTimeControlFilter("blitz")}>Blitz</FilterChip>
-            <FilterChip active={timeControlFilter === "rapid"} onClick={() => setTimeControlFilter("rapid")}>Rapid</FilterChip>
+          <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-5">
+            <span className="mr-1 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-600">Format</span>
+            {(["all", "bullet", "blitz", "rapid"] as const).map((fc) => (
+              <FilterChip key={fc} active={timeControlFilter === fc} onClick={() => setTimeControlFilter(fc)}>
+                {fc === "all" ? "All" : fc.charAt(0).toUpperCase() + fc.slice(1)}
+              </FilterChip>
+            ))}
           </div>
         )}
       </div>
 
+      {/* ── Count ────────────────────────────────────────── */}
+      <p className="mb-6 text-[11px] tracking-[0.14em] text-neutral-600 uppercase font-semibold">
+        {filteredAndSorted.length} event{filteredAndSorted.length !== 1 ? "s" : ""}
+      </p>
+
       {filteredAndSorted.length === 0 ? (
         <EmptyState title="No tournaments found" detail="Try a different filter or check back later." />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredAndSorted.map((tournament) => (
-            <Link
-              key={tournament.id}
-              href={`/tournaments/${encodeURIComponent(tournament.id)}`}
-              className="group border border-neutral-800 bg-surface-container-low p-5 transition-colors hover:border-primary/60"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-on-surface-variant">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {filteredAndSorted.map((tournament, i) => (
+            <AnimatedCard key={tournament.id} delay={delays[Math.min(i, delays.length - 1)]}>
+              {/* Double-Bezel card */}
+              <Link
+                href={`/tournaments/${encodeURIComponent(tournament.id)}`}
+                className="group block ring-1 ring-white/[0.06] bg-[#0f0f0f] p-px transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:ring-[#b79262]/40 hover:shadow-[0_0_0_1px_rgba(183,146,98,0.1),0_8px_32px_rgba(0,0,0,0.4)]"
+              >
+                {/* Inner core */}
+                <div className="bg-surface-container-low p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  {/* Source label */}
+                  <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-neutral-500">
                     {tournament.source === "lichess" ? "Online" : "Over the Board"}
                   </p>
-                  <h2 className="mt-2 font-serif text-xl leading-tight text-on-surface group-hover:text-primary md:text-2xl">
+
+                  {/* Name with gold gradient treatment */}
+                  <h2 className="mt-3 font-serif text-xl leading-tight text-gold-gradient group-hover:opacity-90 transition-opacity duration-300 md:text-2xl">
                     {tournament.name}
                   </h2>
+
+                  {/* Hairline divider — mirrors hero divider */}
+                  <div className="mt-4 h-px bg-gradient-to-r from-[#b79262]/30 to-transparent" />
+
+                  {/* Meta */}
+                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-600">Date</dt>
+                      <dd className="mt-1 text-neutral-300">{formatDate(tournament.date)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-600">
+                        {tournament.source === "lichess" ? "Clock" : "Rounds"}
+                      </dt>
+                      <dd className="mt-1 text-neutral-300">
+                        {tournament.source === "lichess" ? formatClock(tournament) : tournament.rounds}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {/* Status badge row */}
+                  <div className="mt-4 flex items-center justify-between">
+                    <StatusBadge status={tournament.status} />
+                    {/* Diamond glyph — mirrors hero deco */}
+                    <span className="h-2 w-2 rotate-45 border border-[#b79262]/30 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                  </div>
                 </div>
-                <StatusBadge status={tournament.status} />
-              </div>
-              <dl className="mt-5 grid grid-cols-2 gap-3 text-sm text-on-surface-variant">
-                <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500">Date</dt>
-                  <dd className="mt-1">{tournament.date || "Unscheduled"}</dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500">
-                    {tournament.source === "lichess" ? "Clock" : "Rounds"}
-                  </dt>
-                  <dd className="mt-1">
-                    {tournament.source === "lichess" ? formatClock(tournament) : tournament.rounds}
-                  </dd>
-                </div>
-              </dl>
-            </Link>
+              </Link>
+            </AnimatedCard>
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+/* ── Sub-components ─────────────────────────────────────── */
+
+function TypeTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] first:border-r-0 border ${
+        active
+          ? "border-[#b79262] bg-[#b79262]/10 text-[#f2ca50]"
+          : "border-white/[0.08] text-neutral-500 hover:border-[#b79262]/40 hover:text-neutral-300"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -152,10 +222,10 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-9 border px-4 text-[10px] font-bold uppercase tracking-[0.16em] transition-all ${
-        active 
-          ? "border-primary bg-primary text-[#111111]" 
-          : "border-neutral-800 text-on-surface-variant hover:border-neutral-600 hover:bg-neutral-900"
+      className={`min-h-8 border px-3 text-[9px] font-bold uppercase tracking-[0.16em] transition-all duration-150 active:scale-[0.97] ${
+        active
+          ? "border-[#b79262]/70 bg-[#b79262]/10 text-[#f2ca50]"
+          : "border-white/[0.07] text-neutral-600 hover:border-white/20 hover:text-neutral-400"
       }`}
     >
       {children}

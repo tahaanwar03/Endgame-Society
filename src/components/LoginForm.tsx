@@ -43,41 +43,41 @@ export function LoginForm() {
   }, [isAdmin, loading, router, user]);
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-4">
-      <section className="w-full max-w-md border border-neutral-800 bg-surface-container-low p-6">
-        <Link href="/" className="font-serif text-xl font-bold italic text-primary">
-          The Endgame Society
+    <main className="grid min-h-screen place-items-center bg-[#050505] px-4">
+      <section className="w-full max-w-[400px] ring-1 ring-white/[0.06] bg-[#0a0a0a] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+        <Link href="/" className="font-serif text-xl font-bold uppercase tracking-[0.06em] text-gold-gradient">
+          Endgame
         </Link>
-        <h1 className="mt-8 font-serif text-3xl text-on-surface">Admin Login</h1>
-        <p className="mt-2 text-sm text-on-surface-variant">Use the Firebase admin email/password configured for this portal.</p>
+        <h1 className="mt-10 font-serif text-3xl uppercase tracking-[0.02em] text-neutral-200">Admin Portal</h1>
+        <p className="mt-2 text-[11px] uppercase tracking-[0.12em] text-neutral-600">Access Restricted</p>
 
-        <form onSubmit={onSubmit} className="mt-8 space-y-4">
+        <form onSubmit={onSubmit} className="mt-10 space-y-5">
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">Email</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-600">Email Address</span>
             <input
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               type="email"
               required
-              className="mt-2 w-full border border-outline-variant bg-surface-dim px-3 py-3 text-on-surface outline-none focus:border-primary"
+              className="mt-2 h-11 w-full border border-white/[0.08] bg-[#0d0d0d] px-4 text-sm text-neutral-200 outline-none transition-colors focus:border-[#b79262]/50"
             />
           </label>
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">Password</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-600">Password</span>
             <input
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               type="password"
               required
-              className="mt-2 w-full border border-outline-variant bg-surface-dim px-3 py-3 text-on-surface outline-none focus:border-primary"
+              className="mt-2 h-11 w-full border border-white/[0.08] bg-[#0d0d0d] px-4 text-sm text-neutral-200 outline-none transition-colors focus:border-[#b79262]/50"
             />
           </label>
-          {error ? <p className="border border-error-container bg-error-container/20 p-3 text-sm text-error">{error}</p> : null}
+          {error ? <p className="border border-red-900/30 bg-red-900/10 p-3 text-[11px] text-red-500">{error}</p> : null}
           <button
             disabled={submitting}
-            className="min-h-12 w-full bg-primary px-5 text-xs font-bold uppercase tracking-[0.2em] text-on-primary disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 w-full bg-[#b79262] px-5 text-[10px] font-bold uppercase tracking-[0.24em] text-[#0a0a0a] transition-all hover:bg-[#c9a678] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {submitting ? "Signing in" : "Sign in"}
+            {submitting ? "Verifying..." : "Enter Portal"}
           </button>
         </form>
       </section>

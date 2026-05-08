@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useGames, useMatches, usePlayers, useTournaments } from "@/lib/firestore-hooks";
@@ -24,6 +24,29 @@ const tabs: { id: Tab; label: string }[] = [
 
 function isGroupStageSection(section: StageMatchSection): section is GroupStageMatchSection {
   return section.stage.type === "group";
+}
+
+function formatDate(dateStr: string | undefined | null): string {
+  if (!dateStr) return "Unscheduled";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+/* IntersectionObserver hook for entry animation */
+function AnimatedSection({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { el.classList.add("in-view"); observer.disconnect(); } },
+      { threshold: 0.05 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={ref} className={`animate-fade-up ${className}`}>{children}</div>;
 }
 
 export function TournamentDashboard({ tournamentId }: { tournamentId: string }) {
@@ -61,13 +84,12 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
     );
   }
 
-  // Lichess logic
   if (tournament.source === "lichess") {
     return (
-      <LichessTournamentDashboard 
-        tournament={tournament} 
-        games={games.data} 
-        tab={tab} 
+      <LichessTournamentDashboard
+        tournament={tournament}
+        games={games.data}
+        tab={tab}
         setTab={setTab}
         selectedPlayerId={selectedPlayerId}
         setSelectedPlayerId={setSelectedPlayerId}
@@ -75,54 +97,56 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
     );
   }
 
-  // Manual logic
   const stageSections = groupMatchesByStage(tournament, matches.data);
   const rosterGroups = getTournamentPlayersByGroup(tournament, players.data);
   const standingsByGroup = buildStandingsByGroup(tournament, players.data, matches.data);
   const totalRosteredPlayers = Array.from(rosterGroups.grouped.values()).reduce((sum, group) => sum + group.length, 0) + rosterGroups.unassigned.length;
-  const totalGroups = Array.from(rosterGroups.grouped.keys()).length;
-  const currentStageName =
-    stageSections.find((section) =>
-      isGroupStageSection(section)
-        ? section.groupSections.some((groupSection) => groupSection.matches.length > 0)
-        : section.matches.length > 0
-    )?.stage.name ?? tournament.stages[0]?.name ?? "Group Stage";
-
   const selectedPlayerName = selectedPlayerId ? getPlayerName(players.data, selectedPlayerId) : null;
 
   return (
-    <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
-      <section className="mb-8 border-l-2 border-primary pl-4">
+    <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-14">
+      {/* ── Tournament header ────────────────────────────── */}
+      <AnimatedSection className="mb-10">
         <Link
           href="/tournaments"
-          className="mb-4 inline-flex min-h-10 items-center border border-neutral-700 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant transition hover:border-primary hover:text-primary"
+          className="mb-6 inline-flex min-h-9 items-center gap-2 border border-white/[0.08] px-3 text-[9px] font-bold uppercase tracking-[0.22em] text-neutral-500 transition hover:border-[#b79262]/50 hover:text-[#f2ca50]"
         >
-          Back to tournaments
+          ← Tournaments
         </Link>
-        <div className="mb-3 flex items-center gap-3">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Tournament Dashboard</p>
-          <StatusBadge status={tournament.status} />
+        {/* Gold hairline left accent — matches hero divider style */}
+        <div className="border-l-2 border-[#b79262]/60 pl-4">
+          <div className="mb-2 flex items-center gap-3">
+            <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-neutral-600">
+              Tournament Dashboard
+            </p>
+            <StatusBadge status={tournament.status} />
+          </div>
+          <h1 className="font-serif text-3xl uppercase tracking-[0.04em] text-gold-gradient leading-tight md:text-[2.6rem]">
+            {tournament.name}
+          </h1>
+          <p className="mt-2 text-xs text-neutral-600 tracking-[0.12em]">
+            {formatDate(tournament.date)}{tournament.rounds ? ` · ${tournament.rounds} rounds` : ""}
+          </p>
         </div>
-        <h1 className="font-serif text-[2.1rem] leading-tight text-on-surface md:text-4xl">{tournament.name}</h1>
-        <p className="mt-2 text-sm text-neutral-500">{`${tournament.date || "Unscheduled"} - ${tournament.rounds} rounds`}</p>
-        <div className="mt-4 grid grid-cols-3 gap-2 md:hidden">
+        {/* Summary chips — mobile only */}
+        <div className="mt-5 grid grid-cols-3 gap-2 md:hidden">
           <SummaryChip label="Players" value={String(totalRosteredPlayers)} />
-          <SummaryChip label="Groups" value={String(totalGroups)} />
-          <SummaryChip label="Stage" value={currentStageName} />
+          <SummaryChip label="Stage" value={tournament.stages[0]?.name ?? "—"} />
+          <SummaryChip label="Rounds" value={String(tournament.rounds)} />
         </div>
-      </section>
+      </AnimatedSection>
 
-      <div className="sticky top-16 z-20 mb-6 flex border-b border-neutral-800 bg-[#131313]">
+      {/* ── Tab navigation ───────────────────────────────── */}
+      <div className="sticky top-16 z-20 mb-8 flex border-b border-white/[0.06] bg-[#0e0e0e]">
         {tabs.map((item) => (
           <button
             key={item.id}
             type="button"
-            onClick={() => {
-              setTab(item.id);
-              if (item.id !== "fixtures") setSelectedPlayerId(null);
-            }}
-            className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] md:min-h-12 md:text-xs md:tracking-[0.18em] ${
-              tab === item.id ? "border-b-2 border-primary text-primary" : "text-neutral-500"
+            onClick={() => { setTab(item.id); if (item.id !== "fixtures") setSelectedPlayerId(null); }}
+            className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 md:min-h-12 ${
+              tab === item.id
+                ? "border-b-2 border-[#b79262] text-[#f2ca50]"
+                : "text-neutral-600 hover:text-neutral-400"
             }`}
           >
             {item.label}
@@ -130,201 +154,183 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
         ))}
       </div>
 
-      {tab === "standings" ? (
+      {/* ── Standings ────────────────────────────────────── */}
+      {tab === "standings" && (
         <section className="space-y-5">
-          {standingsByGroup.every((group) => group.players.length === 0) ? (
+          {standingsByGroup.every((g) => g.players.length === 0) ? (
             <EmptyState title="No group standings yet" detail="Assign players to groups and record group-stage results in admin." />
           ) : (
             standingsByGroup.map((group) => (
-              <div key={group.groupCode} className="overflow-hidden border border-neutral-800 bg-surface-container-low">
-                <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-                  Group {group.groupCode}
-                </h2>
-                {group.players.length === 0 ? (
-                  <div className="p-6 text-sm text-on-surface-variant">No players assigned.</div>
-                ) : group.standings.length === 0 ? (
-                  <div className="p-6 text-sm text-on-surface-variant">No completed group matches yet.</div>
-                ) : (
-                  <div className="overflow-hidden">
+              <AnimatedSection key={group.groupCode}>
+                <div className="overflow-hidden ring-1 ring-white/[0.06]">
+                  {/* Group heading */}
+                  <div className="flex items-center gap-3 bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+                    <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
+                    <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">
+                      Group {group.groupCode}
+                    </h2>
+                  </div>
+                  {group.standings.length === 0 ? (
+                    <div className="p-6 text-sm text-neutral-600">No completed group matches yet.</div>
+                  ) : (
                     <table className="w-full table-fixed text-left text-[11px] md:text-sm">
-                      <thead className="bg-neutral-900 text-[9px] uppercase tracking-[0.12em] text-on-surface-variant md:text-[10px] md:tracking-[0.18em]">
+                      <thead className="bg-[#0d0d0d] text-[9px] uppercase tracking-[0.14em] text-neutral-600 md:text-[10px]">
                         <tr>
-                          <th className="w-[13%] px-2 py-3 text-center md:px-4 md:py-4">Rk</th>
-                          <th className="w-[39%] px-2 py-3 md:px-4 md:py-4">Player</th>
-                          <th className="w-[12%] px-1 py-3 text-right md:px-4 md:py-4">Pts</th>
-                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">P</th>
-                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">W</th>
-                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">D</th>
-                          <th className="w-[9%] px-1 py-3 text-center md:px-3 md:py-4">L</th>
+                          <th className="w-[12%] px-4 py-3 text-center">Rk</th>
+                          <th className="w-[40%] px-4 py-3">Player</th>
+                          <th className="w-[12%] px-3 py-3 text-right">Pts</th>
+                          <th className="w-[9%] px-2 py-3 text-center">P</th>
+                          <th className="w-[9%] px-2 py-3 text-center">W</th>
+                          <th className="w-[9%] px-2 py-3 text-center">D</th>
+                          <th className="w-[9%] px-2 py-3 text-center">L</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-neutral-900">
+                      <tbody className="divide-y divide-white/[0.04]">
                         {group.standings.map((standing, index) => (
-                          <tr key={standing.player.id} className="zebra-row">
-                            <td className="px-2 py-3 text-center font-bold text-primary md:px-4 md:py-4">{index + 1}</td>
-                            <td className="px-2 py-3 font-semibold leading-tight md:px-4 md:py-4">
-                              <button 
+                          <tr key={standing.player.id} className="transition-colors duration-150 hover:bg-[#b79262]/[0.03]">
+                            <td className="px-4 py-3 text-center font-serif font-bold text-[#f2ca50] md:py-4">{index + 1}</td>
+                            <td className="px-4 py-3 md:py-4">
+                              <button
                                 onClick={() => { setTab("fixtures"); setSelectedPlayerId(standing.player.id); }}
-                                className="block truncate text-left hover:text-primary transition-colors cursor-pointer w-full"
+                                className="block w-full truncate text-left font-semibold text-neutral-300 transition-colors duration-150 hover:text-[#f2ca50]"
                               >
                                 {standing.player.name}
                               </button>
                             </td>
-                            <td className="px-1 py-3 text-right font-bold text-primary md:px-4 md:py-4">{standing.points}</td>
-                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.played}</td>
-                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.wins}</td>
-                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.draws}</td>
-                            <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.losses}</td>
+                            <td className="px-3 py-3 text-right font-bold text-[#f2ca50] md:py-4">{standing.points}</td>
+                            <td className="px-2 py-3 text-center text-neutral-500 md:py-4">{standing.played}</td>
+                            <td className="px-2 py-3 text-center text-neutral-500 md:py-4">{standing.wins}</td>
+                            <td className="px-2 py-3 text-center text-neutral-500 md:py-4">{standing.draws}</td>
+                            <td className="px-2 py-3 text-center text-neutral-500 md:py-4">{standing.losses}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              </AnimatedSection>
             ))
           )}
         </section>
-      ) : null}
+      )}
 
-      {tab === "fixtures" ? (
+      {/* ── Fixtures ─────────────────────────────────────── */}
+      {tab === "fixtures" && (
         <section className="space-y-5">
           {selectedPlayerId && (
-            <div className="flex items-center justify-between border border-primary/30 bg-primary/5 p-4">
-              <span className="text-xs font-bold uppercase tracking-[0.12em] text-primary">
-                Viewing fixtures for: {selectedPlayerName}
-              </span>
-              <button 
-                onClick={() => setSelectedPlayerId(null)}
-                className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-on-surface"
-              >
-                Show all matches
-              </button>
-            </div>
+            <AnimatedSection>
+              <div className="flex items-center justify-between border border-[#b79262]/20 bg-[#b79262]/[0.04] px-4 py-3">
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#f2ca50]">
+                  Viewing: {selectedPlayerName}
+                </span>
+                <button
+                  onClick={() => setSelectedPlayerId(null)}
+                  className="text-[9px] font-bold uppercase tracking-[0.14em] text-neutral-600 underline underline-offset-4 hover:text-neutral-300 transition-colors"
+                >
+                  Show all
+                </button>
+              </div>
+            </AnimatedSection>
           )}
 
           {matches.data.length === 0 ? (
             <EmptyState title="No fixtures created" detail="Admin-created matches will appear here by stage and group." />
           ) : (
             stageSections
-              .map(section => {
-                const filteredMatches = section.matches.filter(m => !selectedPlayerId || m.player1_id === selectedPlayerId || m.player2_id === selectedPlayerId);
-                const filteredGroups = section.groupSections.map(g => ({
-                  ...g,
-                  matches: g.matches.filter(m => !selectedPlayerId || m.player1_id === selectedPlayerId || m.player2_id === selectedPlayerId)
-                })).filter(g => g.matches.length > 0);
-                
-                return { ...section, matches: filteredMatches, groupSections: filteredGroups };
+              .map((section) => {
+                if (isGroupStageSection(section)) {
+                  const filteredGroups = section.groupSections
+                    .map((g) => ({ ...g, matches: g.matches.filter((m) => !selectedPlayerId || m.player1_id === selectedPlayerId || m.player2_id === selectedPlayerId) }))
+                    .filter((g) => g.matches.length > 0);
+                  return filteredGroups.length > 0 ? { ...section, groupSections: filteredGroups } : null;
+                }
+                const filteredMatches = section.matches.filter((m) => !selectedPlayerId || m.player1_id === selectedPlayerId || m.player2_id === selectedPlayerId);
+                return filteredMatches.length > 0 ? { ...section, matches: filteredMatches } : null;
               })
-              .filter(section => section.matches.length > 0 || section.groupSections.length > 0)
+              .filter((s): s is NonNullable<typeof s> => s !== null)
               .map((section) => (
-                <div key={section.stage.id} className="border border-neutral-800 bg-surface-container-low">
-                  <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-                    {section.stage.name}
-                  </h2>
-                  {isGroupStageSection(section) ? (
-                    <div className="space-y-5 p-4">
-                      {section.groupSections.map((groupSection) => (
-                        <div key={groupSection.groupCode}>
-                          <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">Group {groupSection.groupCode}</p>
-                          <div className="divide-y divide-neutral-900 border border-neutral-900">
-                            {groupSection.matches.map((match) => (
-                              <Link
-                                key={match.id}
-                                href={`/match/${match.id}`}
-                                className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
-                              >
-                                <span className="min-w-0 truncate">
-                                  {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
-                                </span>
-                                <span className="text-xs font-bold text-primary md:text-sm">{match.result ?? "Pending"}</span>
-                              </Link>
-                            ))}
+                <AnimatedSection key={section.stage.id}>
+                  <div className="ring-1 ring-white/[0.06]">
+                    <div className="flex items-center gap-3 bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+                      <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
+                      <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">{section.stage.name}</h2>
+                    </div>
+                    {isGroupStageSection(section) ? (
+                      <div className="space-y-5 p-5">
+                        {section.groupSections.map((g) => (
+                          <div key={g.groupCode}>
+                            <p className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-600">Group {g.groupCode}</p>
+                            <div className="divide-y divide-white/[0.04] ring-1 ring-white/[0.05]">
+                              {g.matches.map((match) => (
+                                <FixtureRow key={match.id} matchId={match.id} player1={formatFixturePlayerName(match.player1_id, players.data)} player2={formatFixturePlayerName(match.player2_id, players.data)} result={match.result ?? null} />
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-neutral-900">
-                      {section.matches.map((match) => (
-                        <Link
-                          key={match.id}
-                          href={`/match/${match.id}`}
-                          className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
-                        >
-                          <span className="min-w-0 truncate">
-                            {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
-                          </span>
-                          <span className="text-xs font-bold text-primary md:text-sm">{match.result ?? "Pending"}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/[0.04]">
+                        {section.matches.map((match) => (
+                          <FixtureRow key={match.id} matchId={match.id} player1={formatFixturePlayerName(match.player1_id, players.data)} player2={formatFixturePlayerName(match.player2_id, players.data)} result={match.result ?? null} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </AnimatedSection>
               ))
           )}
-          {selectedPlayerId && stageSections.every(s => s.matches.length === 0 && s.groupSections.length === 0) && (
-            <EmptyState title="No matches found" detail={`No games recorded for ${selectedPlayerName} in this tournament yet.`} />
-          )}
         </section>
-      ) : null}
+      )}
 
-      {tab === "players" ? (
+      {/* ── Players ──────────────────────────────────────── */}
+      {tab === "players" && (
         <section className="space-y-5">
-          {Array.from(rosterGroups.grouped.values()).every((group) => group.length === 0) && rosterGroups.unassigned.length === 0 ? (
+          {Array.from(rosterGroups.grouped.values()).every((g) => g.length === 0) && rosterGroups.unassigned.length === 0 ? (
             <EmptyState title="No players assigned" detail="Assigned tournament players will appear here grouped by stage groups." />
           ) : (
             <>
               {Array.from(rosterGroups.grouped.entries()).map(([groupCode, groupPlayers]) => (
-                <div key={groupCode} className="border border-neutral-800 bg-surface-container-low">
-                  <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-                    Group {groupCode}
-                  </h2>
-                  {groupPlayers.length === 0 ? (
-                    <p className="p-4 text-sm text-on-surface-variant">No players assigned.</p>
-                  ) : (
-                    <div className="grid gap-px bg-neutral-900 md:grid-cols-2">
+                <AnimatedSection key={groupCode}>
+                  <div className="ring-1 ring-white/[0.06]">
+                    <div className="flex items-center gap-3 bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+                      <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
+                      <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">Group {groupCode}</h2>
+                    </div>
+                    <div className="grid gap-px bg-white/[0.04] md:grid-cols-2">
                       {groupPlayers.map((player) => (
-                        <div key={player.id} className="bg-surface-container-low px-4 py-4 text-sm">
-                          {player.name}
-                        </div>
+                        <div key={player.id} className="bg-[#131313] px-5 py-4 text-sm font-medium text-neutral-300">{player.name}</div>
+                      ))}
+                    </div>
+                  </div>
+                </AnimatedSection>
+              ))}
+              <AnimatedSection>
+                <div className="ring-1 ring-white/[0.06]">
+                  <div className="flex items-center gap-3 bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+                    <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-600">Unassigned</h2>
+                  </div>
+                  {rosterGroups.unassigned.length === 0 ? (
+                    <p className="p-5 text-sm text-neutral-600">Every rostered player is placed in a group.</p>
+                  ) : (
+                    <div className="grid gap-px bg-white/[0.04] md:grid-cols-2">
+                      {rosterGroups.unassigned.map((player) => (
+                        <div key={player.id} className="bg-[#131313] px-5 py-4 text-sm font-medium text-neutral-300">{player.name}</div>
                       ))}
                     </div>
                   )}
                 </div>
-              ))}
-
-              <div className="border border-neutral-800 bg-surface-container-low">
-                <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-on-surface-variant">
-                  Unassigned
-                </h2>
-                {rosterGroups.unassigned.length === 0 ? (
-                  <p className="p-4 text-sm text-on-surface-variant">Every rostered player is already placed in a group.</p>
-                ) : (
-                  <div className="grid gap-px bg-neutral-900 md:grid-cols-2">
-                    {rosterGroups.unassigned.map((player) => (
-                      <div key={player.id} className="bg-surface-container-low px-4 py-4 text-sm">
-                        {player.name}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              </AnimatedSection>
             </>
           )}
         </section>
-      ) : null}
+      )}
     </main>
   );
 }
 
+/* ── Lichess Dashboard ───────────────────────────────────── */
 function LichessTournamentDashboard({
-  tournament,
-  games,
-  tab,
-  setTab,
-  selectedPlayerId,
-  setSelectedPlayerId
+  tournament, games, tab, setTab, selectedPlayerId, setSelectedPlayerId
 }: {
   tournament: ReturnType<typeof useTournaments>["data"][number];
   games: ReturnType<typeof useGames>["data"];
@@ -333,48 +339,45 @@ function LichessTournamentDashboard({
   selectedPlayerId: string | null;
   setSelectedPlayerId: (id: string | null) => void;
 }) {
-  const playerCount = tournament.standings.length;
   const clockLabel = tournament.clock ? `${Math.floor(tournament.clock.limit / 60)}+${tournament.clock.increment}` : "Unspecified";
-
-  const filteredGames = games.filter(g => 
-    !selectedPlayerId || 
-    g.white.toLowerCase() === selectedPlayerId.toLowerCase() || 
-    g.black.toLowerCase() === selectedPlayerId.toLowerCase()
-  );
+  const filteredGames = games.filter((g) => !selectedPlayerId || g.white.toLowerCase() === selectedPlayerId.toLowerCase() || g.black.toLowerCase() === selectedPlayerId.toLowerCase());
 
   return (
-    <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
-      <section className="mb-8 border-l-2 border-primary pl-4">
+    <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-14">
+      {/* Header */}
+      <AnimatedSection className="mb-10">
         <Link
           href="/tournaments"
-          className="mb-4 inline-flex min-h-10 items-center border border-neutral-700 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant transition hover:border-primary hover:text-primary"
+          className="mb-6 inline-flex min-h-9 items-center gap-2 border border-white/[0.08] px-3 text-[9px] font-bold uppercase tracking-[0.22em] text-neutral-500 transition hover:border-[#b79262]/50 hover:text-[#f2ca50]"
         >
-          Back to tournaments
+          ← Tournaments
         </Link>
-        <div className="mb-3 flex items-center gap-3">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-on-surface-variant">Lichess Tournament Mirror</p>
-          <StatusBadge status={tournament.status} />
+        <div className="border-l-2 border-[#b79262]/60 pl-4">
+          <div className="mb-2 flex items-center gap-3">
+            <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-neutral-600">Online · Lichess</p>
+            <StatusBadge status={tournament.status} />
+          </div>
+          <h1 className="font-serif text-3xl uppercase tracking-[0.04em] text-gold-gradient leading-tight md:text-[2.6rem]">
+            {tournament.name}
+          </h1>
+          <p className="mt-2 text-xs text-neutral-600 tracking-[0.12em]">{formatDate(tournament.date)}</p>
         </div>
-        <h1 className="font-serif text-[2.1rem] leading-tight text-on-surface md:text-4xl">{tournament.name}</h1>
-        <p className="mt-2 text-sm text-neutral-500">{tournament.date || "Unscheduled"}</p>
-        <div className="mt-4 grid grid-cols-3 gap-2 md:hidden">
-          <SummaryChip label="Players" value={String(playerCount)} />
+        <div className="mt-5 grid grid-cols-3 gap-2 md:hidden">
+          <SummaryChip label="Players" value={String(tournament.standings.length)} />
           <SummaryChip label="Clock" value={clockLabel} />
           <SummaryChip label="Games" value={String(games.length)} />
         </div>
-      </section>
+      </AnimatedSection>
 
-      <div className="sticky top-16 z-20 mb-6 flex border-b border-neutral-800 bg-[#131313]">
+      {/* Tabs */}
+      <div className="sticky top-16 z-20 mb-8 flex border-b border-white/[0.06] bg-[#0e0e0e]">
         {tabs.map((item) => (
           <button
             key={item.id}
             type="button"
-            onClick={() => {
-              setTab(item.id);
-              if (item.id !== "fixtures") setSelectedPlayerId(null);
-            }}
-            className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] md:min-h-12 md:text-xs md:tracking-[0.18em] ${
-              tab === item.id ? "border-b-2 border-primary text-primary" : "text-neutral-500"
+            onClick={() => { setTab(item.id); if (item.id !== "fixtures") setSelectedPlayerId(null); }}
+            className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 md:min-h-12 ${
+              tab === item.id ? "border-b-2 border-[#b79262] text-[#f2ca50]" : "text-neutral-600 hover:text-neutral-400"
             }`}
           >
             {item.label}
@@ -382,125 +385,146 @@ function LichessTournamentDashboard({
         ))}
       </div>
 
-      {tab === "standings" ? (
-        <section className="overflow-hidden border border-neutral-800 bg-surface-container-low">
-          <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-            Live standings snapshot
-          </h2>
-          {tournament.standings.length === 0 ? (
-            <p className="p-6 text-sm text-on-surface-variant">No standings snapshot has been synced yet.</p>
-          ) : (
-            <div className="overflow-hidden">
+      {/* Standings */}
+      {tab === "standings" && (
+        <AnimatedSection>
+          <div className="ring-1 ring-white/[0.06]">
+            <div className="flex items-center gap-3 bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+              <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
+              <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">Live standings snapshot</h2>
+            </div>
+            {tournament.standings.length === 0 ? (
+              <p className="p-6 text-sm text-neutral-600">No standings snapshot has been synced yet.</p>
+            ) : (
               <table className="w-full table-fixed text-left text-[11px] md:text-sm">
-                <thead className="bg-neutral-900 text-[9px] uppercase tracking-[0.12em] text-on-surface-variant md:text-[10px] md:tracking-[0.18em]">
+                <thead className="bg-[#0d0d0d] text-[9px] uppercase tracking-[0.14em] text-neutral-600 md:text-[10px]">
                   <tr>
-                    <th className="w-[14%] px-2 py-3 text-center md:px-4 md:py-4">Rk</th>
-                    <th className="w-[56%] px-2 py-3 md:px-4 md:py-4">Player</th>
-                    <th className="w-[30%] px-2 py-3 text-right md:px-4 md:py-4">Score</th>
+                    <th className="w-[14%] px-4 py-3 text-center">Rk</th>
+                    <th className="w-[56%] px-4 py-3">Player</th>
+                    <th className="w-[30%] px-4 py-3 text-right">Score</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-900">
+                <tbody className="divide-y divide-white/[0.04]">
                   {tournament.standings.map((standing) => (
-                    <tr key={standing.userId} className="zebra-row">
-                      <td className="px-2 py-3 text-center font-bold text-primary md:px-4 md:py-4">{standing.rank}</td>
-                      <td className="px-2 py-3 font-semibold leading-tight md:px-4 md:py-4">
-                        <button 
+                    <tr key={standing.userId} className="transition-colors duration-150 hover:bg-[#b79262]/[0.03]">
+                      <td className="px-4 py-3 text-center font-serif font-bold text-[#f2ca50] md:py-4">{standing.rank}</td>
+                      <td className="px-4 py-3 md:py-4">
+                        <button
                           onClick={() => { setTab("fixtures"); setSelectedPlayerId(standing.userId); }}
-                          className="block truncate text-left hover:text-primary transition-colors cursor-pointer w-full"
+                          className="block w-full truncate text-left font-semibold text-neutral-300 transition-colors duration-150 hover:text-[#f2ca50]"
                         >
                           {standing.username}
                         </button>
                       </td>
-                      <td className="px-2 py-3 text-right font-bold text-primary md:px-4 md:py-4">{standing.score}</td>
+                      <td className="px-4 py-3 text-right font-bold text-[#f2ca50] md:py-4">{standing.score}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
-        </section>
-      ) : null}
+            )}
+          </div>
+        </AnimatedSection>
+      )}
 
-      {tab === "fixtures" ? (
-        <section className="border border-neutral-800 bg-surface-container-low">
-          <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-            {selectedPlayerId ? `Matches for ${selectedPlayerId}` : "Archived games"}
-          </h2>
-          
-          {selectedPlayerId && (
-            <div className="flex items-center justify-between border-b border-neutral-800 bg-primary/5 p-4">
-              <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
-                Filtering by player
-              </span>
-              <button 
-                onClick={() => setSelectedPlayerId(null)}
-                className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-on-surface"
-              >
-                Show all matches
-              </button>
-            </div>
-          )}
-
-          {filteredGames.length === 0 ? (
-            <p className="p-6 text-sm text-on-surface-variant">No games found{selectedPlayerId ? " for this player" : ""}.</p>
-          ) : (
-            <div className="divide-y divide-neutral-900">
-              {filteredGames.map((game) => (
-                <Link
-                  key={game.id}
-                  href={`/match/${game.id}`}
-                  className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
-                >
-                  <span className="min-w-0 truncate">
-                    <span className={selectedPlayerId && game.white.toLowerCase() === selectedPlayerId.toLowerCase() ? "text-primary font-bold" : ""}>{game.white}</span> vs <span className={selectedPlayerId && game.black.toLowerCase() === selectedPlayerId.toLowerCase() ? "text-primary font-bold" : ""}>{game.black}</span>
-                  </span>
-                  <span className="text-xs font-bold text-primary md:text-sm">{game.result}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      {tab === "players" ? (
-        <section className="border border-neutral-800 bg-surface-container-low">
-          <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-            Participants
-          </h2>
-          {tournament.standings.length === 0 ? (
-            <p className="p-6 text-sm text-on-surface-variant">No participant snapshot has been synced yet.</p>
-          ) : (
-            <div className="grid gap-px bg-neutral-900 md:grid-cols-2">
-              {tournament.standings.map((standing) => (
-                <div key={standing.userId} className="bg-surface-container-low px-4 py-4 text-sm">
-                  <p className="font-semibold text-on-surface">{standing.username}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.16em] text-on-surface-variant">
-                    Rank {standing.rank} · Score {standing.score}
-                  </p>
+      {/* Fixtures / Games */}
+      {tab === "fixtures" && (
+        <section className="space-y-4">
+          <AnimatedSection>
+            <div className="ring-1 ring-white/[0.06]">
+              <div className="flex items-center justify-between bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+                <div className="flex items-center gap-3">
+                  <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
+                  <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">
+                    {selectedPlayerId ? `Matches — ${selectedPlayerId}` : "Archived games"}
+                  </h2>
                 </div>
-              ))}
+                {selectedPlayerId && (
+                  <button onClick={() => setSelectedPlayerId(null)} className="text-[9px] font-bold uppercase tracking-[0.14em] text-neutral-600 underline underline-offset-4 hover:text-neutral-300 transition-colors">
+                    Show all
+                  </button>
+                )}
+              </div>
+              {filteredGames.length === 0 ? (
+                <p className="p-6 text-sm text-neutral-600">No games found{selectedPlayerId ? " for this player" : ""}.</p>
+              ) : (
+                <div className="divide-y divide-white/[0.04]">
+                  {filteredGames.map((game) => (
+                    <Link
+                      key={game.id}
+                      href={`/match/${game.id}`}
+                      className="group grid grid-cols-[1fr_auto] gap-3 px-5 py-3 text-sm transition-colors duration-150 hover:bg-[#b79262]/[0.03] md:py-4"
+                    >
+                      <span className="min-w-0 truncate text-neutral-400">
+                        <span className={selectedPlayerId && game.white.toLowerCase() === selectedPlayerId.toLowerCase() ? "font-semibold text-neutral-200" : ""}>{game.white}</span>
+                        <span className="mx-2 text-neutral-700">vs</span>
+                        <span className={selectedPlayerId && game.black.toLowerCase() === selectedPlayerId.toLowerCase() ? "font-semibold text-neutral-200" : ""}>{game.black}</span>
+                      </span>
+                      <span className="font-bold text-[#f2ca50] group-hover:text-[#f2ca50]">{game.result}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+          </AnimatedSection>
         </section>
-      ) : null}
+      )}
+
+      {/* Players */}
+      {tab === "players" && (
+        <AnimatedSection>
+          <div className="ring-1 ring-white/[0.06]">
+            <div className="flex items-center gap-3 bg-[#0a0a0a] px-5 py-3 border-b border-white/[0.05]">
+              <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
+              <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">Participants</h2>
+            </div>
+            {tournament.standings.length === 0 ? (
+              <p className="p-6 text-sm text-neutral-600">No participant snapshot has been synced yet.</p>
+            ) : (
+              <div className="grid gap-px bg-white/[0.04] md:grid-cols-2">
+                {tournament.standings.map((standing) => (
+                  <div key={standing.userId} className="bg-[#131313] px-5 py-4">
+                    <p className="font-semibold text-neutral-300">{standing.username}</p>
+                    <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-neutral-600">
+                      Rank {standing.rank} · Score {standing.score}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </AnimatedSection>
+      )}
     </main>
   );
 }
 
-function formatFixturePlayerName(playerId: string, players: Parameters<typeof getPlayerName>[0]) {
-  if (!playerId) {
-    return "TBD";
-  }
+/* ── Helpers ─────────────────────────────────────────────── */
 
+function FixtureRow({ matchId, player1, player2, result }: { matchId: string; player1: string; player2: string; result: string | null }) {
+  return (
+    <Link
+      href={`/match/${matchId}`}
+      className="group grid grid-cols-[1fr_auto] gap-3 px-5 py-3 text-sm transition-colors duration-150 hover:bg-[#b79262]/[0.03] md:py-4"
+    >
+      <span className="min-w-0 truncate text-neutral-400">
+        {player1} <span className="mx-2 text-neutral-700">vs</span> {player2}
+      </span>
+      <span className="font-bold text-[#f2ca50]">{result ?? "Pending"}</span>
+    </Link>
+  );
+}
+
+function formatFixturePlayerName(playerId: string, players: Parameters<typeof getPlayerName>[0]) {
+  if (!playerId) return "TBD";
   const name = getPlayerName(players, playerId);
   return name === "Unknown player" ? "TBD" : name;
 }
 
 function SummaryChip({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border border-neutral-800 bg-surface-container-low px-3 py-3">
-      <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-on-surface-variant">{label}</p>
-      <p className="mt-1 truncate text-sm font-semibold text-on-surface">{value}</p>
+    <div className="ring-1 ring-white/[0.06] bg-[#0f0f0f] px-3 py-3">
+      <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-600">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold text-neutral-300">{value}</p>
     </div>
   );
 }
