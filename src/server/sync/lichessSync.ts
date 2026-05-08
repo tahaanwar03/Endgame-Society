@@ -83,14 +83,18 @@ async function resolveTournamentIds() {
 
   if (registry.creatorUsernames.length > 0) {
     for (const username of registry.creatorUsernames) {
-      const created = await fetchUserCreatedTournaments(username);
-
-      for (const tournament of created) {
-        tournamentIds.add(tournament.lichessId);
+      try {
+        const created = await fetchUserCreatedTournaments(username);
+        for (const tournament of created) {
+          tournamentIds.add(tournament.lichessId);
+        }
+      } catch (err) {
+        console.error(`Failed to resolve tournaments for ${username}:`, err);
       }
     }
   }
 
+  // Also include any tournaments already in our DB that aren't finished
   const existing = await db.collection("tournaments").where("source", "==", "lichess").get();
 
   for (const document of existing.docs) {
@@ -119,6 +123,7 @@ async function upsertTournament(tournamentId: string) {
   const tournament = await fetchTournamentData(tournamentId);
 
   if (!tournament) {
+    // If it's in our DB but gone from Lichess, archive it
     const existing = await db.collection("tournaments").where("lichessId", "==", tournamentId).limit(1).get();
 
     if (!existing.empty) {
@@ -130,8 +135,7 @@ async function upsertTournament(tournamentId: string) {
         { merge: true }
       );
     }
-
-    throw new Error(`Tournament ${tournamentId} was not found on Lichess.`);
+    return { deterministicId: tournamentId, gamesProcessed: 0 };
   }
 
   const standings = await fetchTournamentResults(tournamentId);
@@ -139,6 +143,8 @@ async function upsertTournament(tournamentId: string) {
   const tournamentRef = db.collection("tournaments").doc(deterministicId);
   const existingSnapshot = await tournamentRef.get();
   const existingStatus = existingSnapshot.get("status");
+  
+  // If both Lichess and our DB say it's finished, we only sync standings once more then freeze metadata
   const isFrozen = existingStatus === "finished" && tournament.status === "finished";
 
   if (!isFrozen) {
@@ -165,20 +171,25 @@ async function upsertTournament(tournamentId: string) {
     );
   }
 
+  // Sync games — we limit to 100 per sync to avoid timeouts
   const games = await fetchTournamentGames(tournamentId);
   let gamesProcessed = 0;
+  const maxGamesPerTournament = 100;
 
   for (const game of games) {
+    if (gamesProcessed >= maxGamesPerTournament) break;
+
     const gameRef = db.collection("games").doc(game.gameId);
     const gameSnapshot = await gameRef.get();
 
-    if (gameSnapshot.exists && typeof gameSnapshot.get("movesPgn") === "string" && gameSnapshot.get("movesPgn")) {
+    // Skip if we already have the PGN
+    if (gameSnapshot.exists && gameSnapshot.get("movesPgn")) {
       continue;
     }
 
-    const pgn = await fetchGamePgn(game.gameId);
+    try {
+      const pgn = await fetchGamePgn(game.gameId);
 
-    if (!pgn?.trim()) {
       await gameRef.set(
         {
           id: game.gameId,
@@ -186,34 +197,18 @@ async function upsertTournament(tournamentId: string) {
           lichessGameId: game.gameId,
           white: game.white,
           black: game.black,
-          result: "1/2-1/2",
-          movesPgn: "",
+          result: pgn ? pgnResultToScore(pgn) : "1/2-1/2",
+          movesPgn: pgn || "",
           status: "finished",
           createdAt: game.createdAt ? Timestamp.fromDate(game.createdAt) : null,
           lastSyncedAt: FieldValue.serverTimestamp()
         },
         { merge: true }
       );
-      continue;
+      gamesProcessed += 1;
+    } catch (e) {
+      console.error(`Failed to sync game ${game.gameId}:`, e);
     }
-
-    await gameRef.set(
-      {
-        id: game.gameId,
-        tournamentId: deterministicId,
-        lichessGameId: game.gameId,
-        white: game.white,
-        black: game.black,
-        result: pgnResultToScore(pgn),
-        movesPgn: pgn,
-        status: "finished",
-        createdAt: game.createdAt ? Timestamp.fromDate(game.createdAt) : null,
-        lastSyncedAt: FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
-
-    gamesProcessed += 1;
   }
 
   return { deterministicId, gamesProcessed };
@@ -221,8 +216,15 @@ async function upsertTournament(tournamentId: string) {
 
 export async function runLichessSync(): Promise<SyncRunResult> {
   const db = getAdminDb();
+  let tournamentIds: string[] = [];
+  try {
+    tournamentIds = await resolveTournamentIds();
+  } catch (e) {
+    console.error("Critical: Could not resolve tournament IDs:", e);
+    return { runId: "failed", tournamentsProcessed: 0, gamesProcessed: 0, errors: ["Registry load failed"], tournamentIds: [] };
+  }
+
   const runRef = db.collection("sync_logs").doc();
-  const tournamentIds = await resolveTournamentIds();
   const errors: string[] = [];
   let tournamentsProcessed = 0;
   let gamesProcessed = 0;
@@ -236,13 +238,18 @@ export async function runLichessSync(): Promise<SyncRunResult> {
     tournamentIds
   });
 
-  for (const tournamentId of tournamentIds) {
+  // Limit sync to 15 tournaments at a time to stay under timeouts
+  const batch = tournamentIds.slice(0, 15);
+
+  for (const tournamentId of batch) {
     try {
       const result = await upsertTournament(tournamentId);
       tournamentsProcessed += 1;
       gamesProcessed += result.gamesProcessed;
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : `Unknown sync error for ${tournamentId}.`);
+      const msg = error instanceof Error ? error.message : `Unknown sync error for ${tournamentId}.`;
+      console.error(msg);
+      errors.push(msg);
     }
   }
 
