@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useTournaments } from "@/lib/firestore-hooks";
 import type { Tournament } from "@/lib/types";
 
-type SourceFilter = "all" | "manual" | "lichess";
+type SourceFilter = "manual" | "lichess";
 type TimeControlFilter = "all" | "bullet" | "blitz" | "rapid";
 type SortMode = "date-desc" | "date-asc" | "name-asc" | "status";
 
@@ -28,18 +28,15 @@ function formatClock(tournament: Tournament): string {
 }
 
 export function TournamentList() {
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("manual");
   const [timeControlFilter, setTimeControlFilter] = useState<TimeControlFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("date-desc");
   const { data: tournaments, loading, error } = useTournaments();
 
-  const hasLichess = tournaments.some((t) => t.source === "lichess");
-
   const filteredAndSorted = useMemo(() => {
     let result = tournaments.filter((t) => {
-      if (sourceFilter !== "all" && t.source !== sourceFilter) return false;
-      if (timeControlFilter !== "all") {
-        if (t.source !== "lichess") return false;
+      if (t.source !== sourceFilter) return false;
+      if (sourceFilter === "lichess" && timeControlFilter !== "all") {
         if (getTimeControlCategory(t) !== timeControlFilter) return false;
       }
       return true;
@@ -67,52 +64,48 @@ export function TournamentList() {
 
   return (
     <section>
-      {/* Filter + Sort bar */}
-      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="flex flex-col gap-3">
-          {/* Source filter */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500 w-16 shrink-0">Type</span>
-            <FilterChip active={sourceFilter === "all"} onClick={() => { setSourceFilter("all"); setTimeControlFilter("all"); }}>All Events</FilterChip>
-            <FilterChip active={sourceFilter === "lichess"} onClick={() => setSourceFilter("lichess")}>Online</FilterChip>
-            <FilterChip active={sourceFilter === "manual"} onClick={() => { setSourceFilter("manual"); setTimeControlFilter("all"); }}>Over the Board</FilterChip>
+      {/* Filter bar */}
+      <div className="mb-8 space-y-6">
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <FilterChip active={sourceFilter === "manual"} onClick={() => { setSourceFilter("manual"); setTimeControlFilter("all"); }}>
+              Over the Board
+            </FilterChip>
+            <FilterChip active={sourceFilter === "lichess"} onClick={() => setSourceFilter("lichess")}>
+              Online
+            </FilterChip>
           </div>
 
-          {/* Time control filter — only visible when online or all (with lichess events) */}
-          {(sourceFilter === "lichess" || (sourceFilter === "all" && hasLichess)) && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500 w-16 shrink-0">Format</span>
-              <FilterChip active={timeControlFilter === "all"} onClick={() => setTimeControlFilter("all")}>All</FilterChip>
-              <FilterChip active={timeControlFilter === "bullet"} onClick={() => setTimeControlFilter("bullet")}>Bullet</FilterChip>
-              <FilterChip active={timeControlFilter === "blitz"} onClick={() => setTimeControlFilter("blitz")}>Blitz</FilterChip>
-              <FilterChip active={timeControlFilter === "rapid"} onClick={() => setTimeControlFilter("rapid")}>Rapid</FilterChip>
-            </div>
-          )}
+          {/* Sort */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500">Sort</span>
+            {([
+              ["date-desc", "Newest"],
+              ["date-asc", "Oldest"],
+              ["name-asc", "A–Z"],
+              ["status", "Status"]
+            ] as const).map(([mode, label]) => (
+              <FilterChip key={mode} active={sortMode === mode} onClick={() => setSortMode(mode)}>
+                {label}
+              </FilterChip>
+            ))}
+          </div>
         </div>
 
-        {/* Sort */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500">Sort</span>
-          {([
-            ["date-desc", "Newest first"],
-            ["date-asc", "Oldest first"],
-            ["name-asc", "Name A–Z"],
-            ["status", "By status"]
-          ] as const).map(([mode, label]) => (
-            <FilterChip key={mode} active={sortMode === mode} onClick={() => setSortMode(mode)}>
-              {label}
-            </FilterChip>
-          ))}
-        </div>
+        {/* Format sub-filter (Online only) */}
+        {sourceFilter === "lichess" && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-neutral-900 pt-6">
+            <span className="mr-2 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500">Format</span>
+            <FilterChip active={timeControlFilter === "all"} onClick={() => setTimeControlFilter("all")}>All</FilterChip>
+            <FilterChip active={timeControlFilter === "bullet"} onClick={() => setTimeControlFilter("bullet")}>Bullet</FilterChip>
+            <FilterChip active={timeControlFilter === "blitz"} onClick={() => setTimeControlFilter("blitz")}>Blitz</FilterChip>
+            <FilterChip active={timeControlFilter === "rapid"} onClick={() => setTimeControlFilter("rapid")}>Rapid</FilterChip>
+          </div>
+        )}
       </div>
 
-      {/* Results count */}
-      <p className="mb-4 text-xs text-neutral-500">
-        {filteredAndSorted.length} of {tournaments.length} event{tournaments.length !== 1 ? "s" : ""}
-      </p>
-
       {filteredAndSorted.length === 0 ? (
-        <EmptyState title="No tournaments in this view" detail="Try a different filter combination." />
+        <EmptyState title="No tournaments found" detail="Try a different filter or check back later." />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredAndSorted.map((tournament) => (
@@ -159,8 +152,10 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-9 border px-3 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
-        active ? "border-primary bg-primary text-[#111111]" : "border-neutral-800 text-on-surface-variant hover:border-neutral-600"
+      className={`min-h-9 border px-4 text-[10px] font-bold uppercase tracking-[0.16em] transition-all ${
+        active 
+          ? "border-primary bg-primary text-[#111111]" 
+          : "border-neutral-800 text-on-surface-variant hover:border-neutral-600 hover:bg-neutral-900"
       }`}
     >
       {children}

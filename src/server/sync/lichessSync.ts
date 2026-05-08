@@ -131,35 +131,38 @@ async function upsertTournament(tournamentId: string) {
   const standings = await fetchTournamentResults(tournamentId);
   const deterministicId = slugifyTournamentId(tournament.name, tournament.lichessId);
   const tournamentRef = db.collection("tournaments").doc(deterministicId);
-  const existingSnap = await tournamentRef.get();
-  const isFrozen = existingSnap.get("status") === "finished" && tournament.status === "finished";
+  
+  // We ALWAYS update basic metadata now to fix any previous date bugs
+  const tournamentDate = (tournament.startedAt || tournament.createdAt || new Date()).toISOString().slice(0, 10);
 
-  if (!isFrozen) {
-    await tournamentRef.set(
-      {
-        id: deterministicId,
-        lichessId: tournament.lichessId,
-        name: tournament.name,
-        status: tournament.status,
-        source: "lichess",
-        createdAt: Timestamp.fromDate(tournament.createdAt),
-        startedAt: tournament.startedAt ? Timestamp.fromDate(tournament.startedAt) : null,
-        endedAt: tournament.endedAt ? Timestamp.fromDate(tournament.endedAt) : null,
-        lastSyncedAt: FieldValue.serverTimestamp(),
-        clock: tournament.clock,
-        standings: normalizeStandings(standings),
-        date: tournament.startedAt ? tournament.startedAt.toISOString().slice(0, 10) : "",
-        rounds: 0,
-        player_ids: [],
-        stages: [],
-        group_assignments: {}
-      },
-      { merge: true }
-    );
-  }
+  await tournamentRef.set(
+    {
+      id: deterministicId,
+      lichessId: tournament.lichessId,
+      name: tournament.name,
+      status: tournament.status,
+      source: "lichess",
+      createdAt: Timestamp.fromDate(tournament.createdAt),
+      startedAt: tournament.startedAt ? Timestamp.fromDate(tournament.startedAt) : null,
+      endedAt: tournament.endedAt ? Timestamp.fromDate(tournament.endedAt) : null,
+      lastSyncedAt: FieldValue.serverTimestamp(),
+      clock: tournament.clock,
+      standings: normalizeStandings(standings),
+      date: tournamentDate,
+      rounds: 0,
+      player_ids: [],
+      stages: [],
+      group_assignments: {}
+    },
+    { merge: true }
+  );
 
-  // If tournament is frozen (finished + already synced), skip games
-  if (isFrozen) {
+  const existingSnapshot = await tournamentRef.get();
+  const existingStatus = existingSnapshot.get("status");
+  
+  // Only skip game sync if it was already finished in our DB
+  const isPreviouslyFinished = existingStatus === "finished";
+  if (isPreviouslyFinished && tournament.status === "finished") {
     return { deterministicId, gamesProcessed: 0 };
   }
 

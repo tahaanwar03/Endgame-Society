@@ -28,6 +28,8 @@ function isGroupStageSection(section: StageMatchSection): section is GroupStageM
 
 export function TournamentDashboard({ tournamentId }: { tournamentId: string }) {
   const [tab, setTab] = useState<Tab>("standings");
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+
   const tournaments = useTournaments();
   const players = usePlayers();
   const matches = useMatches(tournamentId);
@@ -42,7 +44,6 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
   }
 
   const error = tournaments.error || players.error || matches.error || games.error;
-
   if (error) {
     return (
       <main className="mx-auto max-w-container px-4 py-8 md:px-8">
@@ -52,7 +53,6 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
   }
 
   const tournament = tournaments.data.find((item) => item.id === tournamentId);
-
   if (!tournament) {
     return (
       <main className="mx-auto max-w-container px-4 py-8 md:px-8">
@@ -61,10 +61,21 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
     );
   }
 
+  // Lichess logic
   if (tournament.source === "lichess") {
-    return <LichessTournamentDashboard tournament={tournament} games={games.data} tab={tab} setTab={setTab} />;
+    return (
+      <LichessTournamentDashboard 
+        tournament={tournament} 
+        games={games.data} 
+        tab={tab} 
+        setTab={setTab}
+        selectedPlayerId={selectedPlayerId}
+        setSelectedPlayerId={setSelectedPlayerId}
+      />
+    );
   }
 
+  // Manual logic
   const stageSections = groupMatchesByStage(tournament, matches.data);
   const rosterGroups = getTournamentPlayersByGroup(tournament, players.data);
   const standingsByGroup = buildStandingsByGroup(tournament, players.data, matches.data);
@@ -76,6 +87,8 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
         ? section.groupSections.some((groupSection) => groupSection.matches.length > 0)
         : section.matches.length > 0
     )?.stage.name ?? tournament.stages[0]?.name ?? "Group Stage";
+
+  const selectedPlayerName = selectedPlayerId ? getPlayerName(players.data, selectedPlayerId) : null;
 
   return (
     <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
@@ -104,7 +117,10 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
           <button
             key={item.id}
             type="button"
-            onClick={() => setTab(item.id)}
+            onClick={() => {
+              setTab(item.id);
+              if (item.id !== "fixtures") setSelectedPlayerId(null);
+            }}
             className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] md:min-h-12 md:text-xs md:tracking-[0.18em] ${
               tab === item.id ? "border-b-2 border-primary text-primary" : "text-neutral-500"
             }`}
@@ -147,7 +163,12 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                           <tr key={standing.player.id} className="zebra-row">
                             <td className="px-2 py-3 text-center font-bold text-primary md:px-4 md:py-4">{index + 1}</td>
                             <td className="px-2 py-3 font-semibold leading-tight md:px-4 md:py-4">
-                              <span className="block truncate">{standing.player.name}</span>
+                              <button 
+                                onClick={() => { setTab("fixtures"); setSelectedPlayerId(standing.player.id); }}
+                                className="block truncate text-left hover:text-primary transition-colors cursor-pointer w-full"
+                              >
+                                {standing.player.name}
+                              </button>
                             </td>
                             <td className="px-1 py-3 text-right font-bold text-primary md:px-4 md:py-4">{standing.points}</td>
                             <td className="px-1 py-3 text-center text-neutral-400 md:px-3 md:py-4">{standing.played}</td>
@@ -168,22 +189,44 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
 
       {tab === "fixtures" ? (
         <section className="space-y-5">
+          {selectedPlayerId && (
+            <div className="flex items-center justify-between border border-primary/30 bg-primary/5 p-4">
+              <span className="text-xs font-bold uppercase tracking-[0.12em] text-primary">
+                Viewing fixtures for: {selectedPlayerName}
+              </span>
+              <button 
+                onClick={() => setSelectedPlayerId(null)}
+                className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-on-surface"
+              >
+                Show all matches
+              </button>
+            </div>
+          )}
+
           {matches.data.length === 0 ? (
             <EmptyState title="No fixtures created" detail="Admin-created matches will appear here by stage and group." />
           ) : (
-            stageSections.map((section) => (
-              <div key={section.stage.id} className="border border-neutral-800 bg-surface-container-low">
-                <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-                  {section.stage.name}
-                </h2>
-                {isGroupStageSection(section) ? (
-                  <div className="space-y-5 p-4">
-                    {section.groupSections.map((groupSection) => (
-                      <div key={groupSection.groupCode}>
-                        <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">Group {groupSection.groupCode}</p>
-                        {groupSection.matches.length === 0 ? (
-                          <p className="text-sm text-on-surface-variant">No fixtures yet.</p>
-                        ) : (
+            stageSections
+              .map(section => {
+                const filteredMatches = section.matches.filter(m => !selectedPlayerId || m.player1_id === selectedPlayerId || m.player2_id === selectedPlayerId);
+                const filteredGroups = section.groupSections.map(g => ({
+                  ...g,
+                  matches: g.matches.filter(m => !selectedPlayerId || m.player1_id === selectedPlayerId || m.player2_id === selectedPlayerId)
+                })).filter(g => g.matches.length > 0);
+                
+                return { ...section, matches: filteredMatches, groupSections: filteredGroups };
+              })
+              .filter(section => section.matches.length > 0 || section.groupSections.length > 0)
+              .map((section) => (
+                <div key={section.stage.id} className="border border-neutral-800 bg-surface-container-low">
+                  <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
+                    {section.stage.name}
+                  </h2>
+                  {isGroupStageSection(section) ? (
+                    <div className="space-y-5 p-4">
+                      {section.groupSections.map((groupSection) => (
+                        <div key={groupSection.groupCode}>
+                          <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">Group {groupSection.groupCode}</p>
                           <div className="divide-y divide-neutral-900 border border-neutral-900">
                             {groupSection.matches.map((match) => (
                               <Link
@@ -198,30 +241,30 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                               </Link>
                             ))}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : section.matches.length === 0 ? (
-                  <div className="p-4 text-sm text-on-surface-variant">No fixtures yet.</div>
-                ) : (
-                  <div className="divide-y divide-neutral-900">
-                    {section.matches.map((match) => (
-                      <Link
-                        key={match.id}
-                        href={`/match/${match.id}`}
-                        className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
-                      >
-                        <span className="min-w-0 truncate">
-                          {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
-                        </span>
-                        <span className="text-xs font-bold text-primary md:text-sm">{match.result ?? "Pending"}</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-neutral-900">
+                      {section.matches.map((match) => (
+                        <Link
+                          key={match.id}
+                          href={`/match/${match.id}`}
+                          className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
+                        >
+                          <span className="min-w-0 truncate">
+                            {formatFixturePlayerName(match.player1_id, players.data)} vs {formatFixturePlayerName(match.player2_id, players.data)}
+                          </span>
+                          <span className="text-xs font-bold text-primary md:text-sm">{match.result ?? "Pending"}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+          )}
+          {selectedPlayerId && stageSections.every(s => s.matches.length === 0 && s.groupSections.length === 0) && (
+            <EmptyState title="No matches found" detail={`No games recorded for ${selectedPlayerName} in this tournament yet.`} />
           )}
         </section>
       ) : null}
@@ -279,15 +322,25 @@ function LichessTournamentDashboard({
   tournament,
   games,
   tab,
-  setTab
+  setTab,
+  selectedPlayerId,
+  setSelectedPlayerId
 }: {
   tournament: ReturnType<typeof useTournaments>["data"][number];
   games: ReturnType<typeof useGames>["data"];
   tab: Tab;
   setTab: (tab: Tab) => void;
+  selectedPlayerId: string | null;
+  setSelectedPlayerId: (id: string | null) => void;
 }) {
   const playerCount = tournament.standings.length;
   const clockLabel = tournament.clock ? `${Math.floor(tournament.clock.limit / 60)}+${tournament.clock.increment}` : "Unspecified";
+
+  const filteredGames = games.filter(g => 
+    !selectedPlayerId || 
+    g.white.toLowerCase() === selectedPlayerId.toLowerCase() || 
+    g.black.toLowerCase() === selectedPlayerId.toLowerCase()
+  );
 
   return (
     <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-12">
@@ -316,7 +369,10 @@ function LichessTournamentDashboard({
           <button
             key={item.id}
             type="button"
-            onClick={() => setTab(item.id)}
+            onClick={() => {
+              setTab(item.id);
+              if (item.id !== "fixtures") setSelectedPlayerId(null);
+            }}
             className={`min-h-11 flex-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] md:min-h-12 md:text-xs md:tracking-[0.18em] ${
               tab === item.id ? "border-b-2 border-primary text-primary" : "text-neutral-500"
             }`}
@@ -348,7 +404,12 @@ function LichessTournamentDashboard({
                     <tr key={standing.userId} className="zebra-row">
                       <td className="px-2 py-3 text-center font-bold text-primary md:px-4 md:py-4">{standing.rank}</td>
                       <td className="px-2 py-3 font-semibold leading-tight md:px-4 md:py-4">
-                        <span className="block truncate">{standing.username}</span>
+                        <button 
+                          onClick={() => { setTab("fixtures"); setSelectedPlayerId(standing.userId); }}
+                          className="block truncate text-left hover:text-primary transition-colors cursor-pointer w-full"
+                        >
+                          {standing.username}
+                        </button>
                       </td>
                       <td className="px-2 py-3 text-right font-bold text-primary md:px-4 md:py-4">{standing.score}</td>
                     </tr>
@@ -363,20 +424,35 @@ function LichessTournamentDashboard({
       {tab === "fixtures" ? (
         <section className="border border-neutral-800 bg-surface-container-low">
           <h2 className="border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-primary">
-            Archived games
+            {selectedPlayerId ? `Matches for ${selectedPlayerId}` : "Archived games"}
           </h2>
-          {games.length === 0 ? (
-            <p className="p-6 text-sm text-on-surface-variant">No finished games have been mirrored yet.</p>
+          
+          {selectedPlayerId && (
+            <div className="flex items-center justify-between border-b border-neutral-800 bg-primary/5 p-4">
+              <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
+                Filtering by player
+              </span>
+              <button 
+                onClick={() => setSelectedPlayerId(null)}
+                className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-on-surface"
+              >
+                Show all matches
+              </button>
+            </div>
+          )}
+
+          {filteredGames.length === 0 ? (
+            <p className="p-6 text-sm text-on-surface-variant">No games found{selectedPlayerId ? " for this player" : ""}.</p>
           ) : (
             <div className="divide-y divide-neutral-900">
-              {games.map((game) => (
+              {filteredGames.map((game) => (
                 <Link
                   key={game.id}
                   href={`/match/${game.id}`}
                   className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-sm hover:bg-neutral-900/60 md:px-4 md:py-4"
                 >
                   <span className="min-w-0 truncate">
-                    {game.white} vs {game.black}
+                    <span className={selectedPlayerId && game.white.toLowerCase() === selectedPlayerId.toLowerCase() ? "text-primary font-bold" : ""}>{game.white}</span> vs <span className={selectedPlayerId && game.black.toLowerCase() === selectedPlayerId.toLowerCase() ? "text-primary font-bold" : ""}>{game.black}</span>
                   </span>
                   <span className="text-xs font-bold text-primary md:text-sm">{game.result}</span>
                 </Link>
