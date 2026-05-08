@@ -16,7 +16,7 @@ import {
 } from "firebase/firestore";
 import { getFirebaseServices } from "@/lib/firebase";
 import { createDefaultStages, normalizeStages } from "@/lib/standings";
-import type { Match, MatchResult, Player, Tournament, TournamentStage, TournamentStatus } from "@/lib/types";
+import type { Game, Match, MatchResult, Player, Tournament, TournamentSource, TournamentStage, TournamentStatus } from "@/lib/types";
 
 type CollectionState<T> = {
   data: T[];
@@ -61,7 +61,66 @@ function asResult(value: unknown): MatchResult {
 }
 
 function asStatus(value: unknown): TournamentStatus {
-  return value === "ongoing" || value === "completed" ? value : "upcoming";
+  return value === "ongoing" || value === "completed" || value === "created" || value === "finished" || value === "archived" ? value : "upcoming";
+}
+
+function asSource(value: unknown): TournamentSource {
+  return value === "lichess" ? "lichess" : "manual";
+}
+
+function asClock(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value as Partial<{ limit: unknown; increment: unknown }>;
+
+  return {
+    limit: asNumber(candidate.limit),
+    increment: asNumber(candidate.increment)
+  };
+}
+
+function asStandings(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.reduce<Tournament["standings"]>((accumulator, item) => {
+    if (!item || typeof item !== "object") {
+      return accumulator;
+    }
+
+    const candidate = item as Partial<Tournament["standings"][number]>;
+
+    if (typeof candidate.userId !== "string" || typeof candidate.username !== "string") {
+      return accumulator;
+    }
+
+    accumulator.push({
+      userId: candidate.userId,
+      username: candidate.username,
+      score: asNumber(candidate.score),
+      rank: asNumber(candidate.rank)
+    });
+
+    return accumulator;
+  }, []);
+}
+
+function formatDate(value: unknown) {
+  if (typeof value === "string" && value) {
+    return value;
+  }
+
+  const candidate = value as { toDate?: () => Date } | null | undefined;
+
+  try {
+    const date = candidate?.toDate?.();
+    return date ? date.toISOString().slice(0, 10) : "";
+  } catch {
+    return "";
+  }
 }
 
 function inferStageId(round: number, stages: TournamentStage[]) {
@@ -70,15 +129,25 @@ function inferStageId(round: number, stages: TournamentStage[]) {
 }
 
 function normalizeTournament(id: string, data: DocumentData): Tournament {
+  const source = asSource(data.source);
   const rounds = asNumber(data.rounds, 1);
+
   return {
     id,
     name: asString(data.name),
-    date: asString(data.date),
-    rounds,
+    date: formatDate(data.date) || formatDate(data.startedAt) || formatDate(data.createdAt),
+    rounds: source === "lichess" ? asNumber(data.rounds, 0) : rounds,
     status: asStatus(data.status),
+    source,
+    lichessId: asString(data.lichessId) || undefined,
+    createdAt: data.createdAt,
+    startedAt: data.startedAt,
+    endedAt: data.endedAt,
+    lastSyncedAt: data.lastSyncedAt,
+    clock: asClock(data.clock),
+    standings: asStandings(data.standings),
     player_ids: asStringArray(data.player_ids),
-    stages: normalizeStages(rounds, data.stages),
+    stages: source === "lichess" ? [] : normalizeStages(rounds, data.stages),
     group_assignments: asStringRecord(data.group_assignments)
   };
 }
@@ -108,6 +177,36 @@ function normalizeMatch(id: string, data: DocumentData, tournaments: Tournament[
     pgn: asString(data.pgn),
     created_at: data.created_at
   };
+}
+
+function normalizeGame(id: string, data: DocumentData): Game {
+  return {
+    id,
+    tournamentId: asString(data.tournamentId),
+    lichessGameId: asString(data.lichessGameId) || id,
+    white: asString(data.white) || "White",
+    black: asString(data.black) || "Black",
+    result: (asResult(data.result) ?? "1/2-1/2") as Game["result"],
+    movesPgn: asString(data.movesPgn),
+    status: "finished",
+    createdAt: data.createdAt,
+    lastSyncedAt: data.lastSyncedAt
+  };
+}
+
+function tournamentSortValue(tournament: Tournament) {
+  if (tournament.date) {
+    return tournament.date;
+  }
+
+  const candidate = tournament.startedAt ?? tournament.createdAt;
+  const withToDate = candidate as { toDate?: () => Date } | undefined;
+
+  try {
+    return withToDate?.toDate?.().toISOString() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function useCollectionData<T extends { id: string }>(collectionName: string) {
@@ -151,7 +250,7 @@ export function useTournaments() {
     data: state.data
       .map((tournament) => normalizeTournament(tournament.id, tournament))
       .filter((tournament) => tournament.name)
-      .sort((a, b) => b.date.localeCompare(a.date))
+      .sort((a, b) => tournamentSortValue(b).localeCompare(tournamentSortValue(a)))
   };
 }
 
@@ -183,7 +282,7 @@ export function useMatches(tournamentId?: string) {
           return a.round - b.round;
         }
 
-        return a.created_at && b.created_at ? 0 : 0;
+        return 0;
       })
   };
 }
@@ -226,6 +325,50 @@ export function useMatch(matchId: string) {
   };
 }
 
+export function useGames(tournamentId?: string) {
+  const state = useCollectionData<DocumentData & { id: string }>("games");
+
+  return {
+    ...state,
+    data: state.data
+      .map((game) => normalizeGame(game.id, game))
+      .filter((game) => !tournamentId || game.tournamentId === tournamentId)
+  };
+}
+
+export function useGame(gameId: string) {
+  const [state, setState] = useState<DocumentState<Game>>({
+    data: null,
+    loading: true,
+    error: null
+  });
+
+  useEffect(() => {
+    const services = getFirebaseServices();
+
+    if (!services) {
+      setState({ data: null, loading: false, error: "Firebase environment variables are not configured." });
+      return undefined;
+    }
+
+    return onSnapshot(
+      doc(services.db, "games", gameId),
+      (snapshot) => {
+        setState({
+          data: snapshot.exists() ? normalizeGame(snapshot.id, snapshot.data()) : null,
+          loading: false,
+          error: null
+        });
+      },
+      (error) => {
+        setState({ data: null, loading: false, error: error.message });
+      }
+    );
+  }, [gameId]);
+
+  return state;
+}
+
 function servicesOrThrow() {
   const services = getFirebaseServices();
 
@@ -241,12 +384,16 @@ export async function createTournament(input: {
   date: string;
   rounds: number;
   status: TournamentStatus;
+  source?: TournamentSource;
+  stages?: TournamentStage[];
 }) {
   const { db } = servicesOrThrow();
   await addDoc(collection(db, "tournaments"), {
     ...input,
+    source: input.source || "manual",
+    standings: [],
     player_ids: [],
-    stages: createDefaultStages(input.rounds),
+    stages: input.stages || createDefaultStages(input.rounds),
     group_assignments: {}
   });
 }
@@ -298,16 +445,9 @@ export async function setTournamentPlayerGroup(tournamentId: string, playerId: s
   });
 }
 
-export async function deleteTournamentWithMatches(tournamentId: string, matchIds: string[]) {
+export async function deleteTournamentWithMatches(tournamentId: string) {
   const { db } = servicesOrThrow();
-  const batch = writeBatch(db);
-
-  for (const matchId of matchIds) {
-    batch.delete(doc(db, "matches", matchId));
-  }
-
-  batch.delete(doc(db, "tournaments", tournamentId));
-  await batch.commit();
+  await deleteDoc(doc(db, "tournaments", tournamentId));
 }
 
 export async function deletePlayerAndCleanup(playerId: string, tournamentIds: string[]) {
@@ -334,12 +474,13 @@ export async function createMatch(input: {
   player2_id: string;
 }) {
   const { db } = servicesOrThrow();
-  await addDoc(collection(db, "matches"), {
+  const docRef = await addDoc(collection(db, "matches"), {
     ...input,
     result: null,
     pgn: "",
     created_at: serverTimestamp()
   });
+  return docRef.id;
 }
 
 export async function updateMatch(
