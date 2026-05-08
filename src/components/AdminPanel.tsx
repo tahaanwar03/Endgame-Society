@@ -1696,16 +1696,22 @@ function LichessSyncScreen({ onDone }: { onDone: (message: string) => void }) {
     return getToken(user, /* forceRefresh */ true);
   }
 
-  // Load registry on mount
+  // Load registry once auth user is ready
   useEffect(() => {
+    if (!auth.user) return; // wait for session
     let cancelled = false;
+    setStatus("loading");
+    setErrorMsg(null);
     (async () => {
       try {
         const token = await getIdToken();
         const response = await fetch("/api/admin/lichess-registry", {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({})) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${response.status}`);
+        }
         const data = await response.json() as { tournamentIds: string[]; creatorUsernames: string[] };
         if (!cancelled) {
           setTournamentIds(data.tournamentIds ?? []);
@@ -1721,7 +1727,7 @@ function LichessSyncScreen({ onDone }: { onDone: (message: string) => void }) {
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [auth.user]);
 
   async function saveRegistry() {
     setStatus("saving");
