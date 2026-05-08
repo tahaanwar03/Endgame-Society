@@ -3,7 +3,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "The Endgame Society",
-  description: "A live university chess tournament portal with remote administration."
+  description: "A live university chess tournament portal with remote administration.",
+  icons: {
+    icon: "/brand/logo-square.png",
+  }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -14,6 +14,7 @@ type LichessTournamentApiResponse = {
   isFinished?: boolean;
   isStarted?: boolean;
   nbPlayers?: number;
+  status?: string;
 };
 
 type LichessResultApiResponse = {
@@ -171,35 +172,52 @@ function parseNdjson<T>(input: string | null) {
 }
 
 function normalizeTournamentStatus(data: LichessTournamentApiResponse): LichessTournamentSummary["status"] {
-  if (data.isFinished) {
-    return "finished";
-  }
-
-  if (data.isStarted) {
-    return "ongoing";
-  }
-
+  if (data.isFinished || data.status === "finished") return "finished";
+  if (data.isStarted || data.status === "started") return "ongoing";
   return "created";
 }
 
-function asDate(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? new Date(value) : undefined;
+function asDate(value: number | string | undefined | null) {
+  if (value === undefined || value === null || value === "") return undefined;
+  
+  // Try treating as a timestamp (number or numeric string)
+  const num = Number(value);
+  if (!isNaN(num) && num > 0) {
+    // If num is small (e.g. < 10^11), it's likely seconds since epoch.
+    // Lichess ms timestamps for the 2020s are around 1.6e12.
+    const isSeconds = num < 10000000000;
+    return new Date(isSeconds ? num * 1000 : num);
+  }
+  
+  // Try treating as an ISO string
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? undefined : d;
 }
 
 export async function fetchTournamentData(tournamentId: string) {
-  const data = await fetchJson<LichessTournamentApiResponse>(`/api/tournament/${tournamentId}`);
+  // Try Arena API first
+  let data = await fetchJson<LichessTournamentApiResponse>(`/api/tournament/${tournamentId}`);
+
+  // If not found or looks like Swiss (missing Arena-only fields), try Swiss API
+  if (!data?.id || !data.fullName) {
+    data = await fetchJson<LichessTournamentApiResponse>(`/api/swiss/${tournamentId}`);
+  }
 
   if (!data?.id || !data.fullName) {
     return null;
   }
 
+  const startedAt = asDate(data.startsAt);
+  const endedAt = asDate(data.finishesAt);
+  const createdAt = asDate(data.createdAt) || startedAt || endedAt || new Date();
+
   return {
     lichessId: data.id,
     name: data.fullName,
     status: normalizeTournamentStatus(data),
-    createdAt: asDate(data.createdAt) ?? new Date(),
-    startedAt: asDate(data.startsAt),
-    endedAt: asDate(data.finishesAt),
+    createdAt,
+    startedAt,
+    endedAt,
     clock: {
       limit: typeof data.clock?.limit === "number" ? data.clock.limit : 0,
       increment: typeof data.clock?.increment === "number" ? data.clock.increment : 0

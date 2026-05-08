@@ -87,12 +87,11 @@ async function resolveTournamentIds() {
     }
   }
 
-  // Re-queue active tournaments already in Firestore
+  // Re-queue ALL tournaments already in Firestore to allow metadata/date repairs
   const existing = await db.collection("tournaments").where("source", "==", "lichess").get();
   for (const doc of existing.docs) {
     const lichessId = doc.get("lichessId");
-    const status = doc.get("status");
-    if (typeof lichessId === "string" && (status === "created" || status === "ongoing")) {
+    if (typeof lichessId === "string") {
       tournamentIds.add(lichessId);
     }
   }
@@ -132,8 +131,11 @@ async function upsertTournament(tournamentId: string) {
   const deterministicId = slugifyTournamentId(tournament.name, tournament.lichessId);
   const tournamentRef = db.collection("tournaments").doc(deterministicId);
   
+  const existingSnapshot = await tournamentRef.get();
+  const wasFinished = existingSnapshot.get("status") === "finished";
+  
   // We ALWAYS update basic metadata now to fix any previous date bugs
-  const tournamentDate = (tournament.startedAt || tournament.createdAt || new Date()).toISOString().slice(0, 10);
+  const tournamentDate = (tournament.startedAt || tournament.endedAt || tournament.createdAt || new Date()).toISOString().slice(0, 10);
 
   await tournamentRef.set(
     {
@@ -157,12 +159,8 @@ async function upsertTournament(tournamentId: string) {
     { merge: true }
   );
 
-  const existingSnapshot = await tournamentRef.get();
-  const existingStatus = existingSnapshot.get("status");
-  
-  // Only skip game sync if it was already finished in our DB
-  const isPreviouslyFinished = existingStatus === "finished";
-  if (isPreviouslyFinished && tournament.status === "finished") {
+  // Skip expensive game sync if the tournament was already marked finished in our database
+  if (wasFinished && tournament.status === "finished") {
     return { deterministicId, gamesProcessed: 0 };
   }
 

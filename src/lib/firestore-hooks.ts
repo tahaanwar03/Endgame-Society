@@ -282,7 +282,7 @@ export function useMatches(tournamentId?: string) {
           return a.round - b.round;
         }
 
-        return a.created_at && b.created_at ? 0 : 0;
+        return 0;
       })
   };
 }
@@ -384,14 +384,16 @@ export async function createTournament(input: {
   date: string;
   rounds: number;
   status: TournamentStatus;
+  source?: TournamentSource;
+  stages?: TournamentStage[];
 }) {
   const { db } = servicesOrThrow();
   await addDoc(collection(db, "tournaments"), {
     ...input,
-    source: "manual",
+    source: input.source || "manual",
     standings: [],
     player_ids: [],
-    stages: createDefaultStages(input.rounds),
+    stages: input.stages || createDefaultStages(input.rounds),
     group_assignments: {}
   });
 }
@@ -443,16 +445,9 @@ export async function setTournamentPlayerGroup(tournamentId: string, playerId: s
   });
 }
 
-export async function deleteTournamentWithMatches(tournamentId: string, matchIds: string[]) {
+export async function deleteTournamentWithMatches(tournamentId: string) {
   const { db } = servicesOrThrow();
-  const batch = writeBatch(db);
-
-  for (const matchId of matchIds) {
-    batch.delete(doc(db, "matches", matchId));
-  }
-
-  batch.delete(doc(db, "tournaments", tournamentId));
-  await batch.commit();
+  await deleteDoc(doc(db, "tournaments", tournamentId));
 }
 
 export async function deletePlayerAndCleanup(playerId: string, tournamentIds: string[]) {
@@ -479,12 +474,13 @@ export async function createMatch(input: {
   player2_id: string;
 }) {
   const { db } = servicesOrThrow();
-  await addDoc(collection(db, "matches"), {
+  const docRef = await addDoc(collection(db, "matches"), {
     ...input,
     result: null,
     pgn: "",
     created_at: serverTimestamp()
   });
+  return docRef.id;
 }
 
 export async function updateMatch(

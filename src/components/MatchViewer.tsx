@@ -101,7 +101,7 @@ export function MatchViewer({ matchId }: { matchId: string }) {
       <section className="mb-8">
         {/* Source label */}
         <p className="mb-4 text-[9px] font-bold uppercase tracking-[0.28em] text-neutral-600">
-          {manualMatch ? `Round ${manualMatch.round}` : "Lichess archive"}
+          {manualMatch ? `Round ${manualMatch.round}` : "Lichess arena"}
         </p>
 
         {/* Players vs result — the centrepiece */}

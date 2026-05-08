@@ -55,7 +55,7 @@ function AnimatedCard({ children, delay }: { children: ReactNode; delay: number 
   return (
     <div
       ref={ref}
-      className={`animate-fade-up delay-${delay}`}
+      className={`h-full animate-fade-up delay-${delay}`}
     >
       {children}
     </div>
@@ -150,10 +150,10 @@ export function TournamentList() {
               {/* Double-Bezel card */}
               <Link
                 href={`/tournaments/${encodeURIComponent(tournament.id)}`}
-                className="group block ring-1 ring-white/[0.06] bg-[#0f0f0f] p-px transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:ring-[#b79262]/40 hover:shadow-[0_0_0_1px_rgba(183,146,98,0.1),0_8px_32px_rgba(0,0,0,0.4)]"
+                className="group flex h-full flex-col ring-1 ring-white/[0.06] bg-[#0f0f0f] p-px transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:ring-[#b79262]/40 hover:shadow-[0_0_0_1px_rgba(183,146,98,0.1),0_8px_32px_rgba(0,0,0,0.4)]"
               >
                 {/* Inner core */}
-                <div className="bg-surface-container-low p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <div className="flex h-full flex-col bg-surface-container-low p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   {/* Source label */}
                   <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-neutral-500">
                     {tournament.source === "lichess" ? "Online" : "Over the Board"}
@@ -167,8 +167,9 @@ export function TournamentList() {
                   {/* Hairline divider — mirrors hero divider */}
                   <div className="mt-4 h-px bg-gradient-to-r from-[#b79262]/30 to-transparent" />
 
-                  {/* Meta */}
-                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  {/* Meta - pushed to bottom */}
+                  <div className="mt-auto pt-4">
+                    <dl className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <dt className="text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-600">Date</dt>
                       <dd className="mt-1 text-neutral-300">{formatDate(tournament.date)}</dd>
@@ -181,13 +182,14 @@ export function TournamentList() {
                         {tournament.source === "lichess" ? formatClock(tournament) : tournament.rounds}
                       </dd>
                     </div>
-                  </dl>
+                    </dl>
 
-                  {/* Status badge row */}
-                  <div className="mt-4 flex items-center justify-between">
-                    <StatusBadge status={tournament.status} />
-                    {/* Diamond glyph — mirrors hero deco */}
-                    <span className="h-2 w-2 rotate-45 border border-[#b79262]/30 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                    {/* Status badge row */}
+                    <div className="mt-4 flex items-center justify-between">
+                      <StatusBadge status={tournament.status} />
+                      {/* Diamond glyph — mirrors hero deco */}
+                      <span className="h-2 w-2 rotate-45 border border-[#b79262]/30 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                    </div>
                   </div>
                 </div>
               </Link>
@@ -206,7 +208,7 @@ function TypeTab({ active, onClick, children }: { active: boolean; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] first:border-r-0 border ${
+      className={`min-h-10 min-w-[140px] px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] first:border-r-0 border ${
         active
           ? "border-[#b79262] bg-[#b79262]/10 text-[#f2ca50]"
           : "border-white/[0.08] text-neutral-500 hover:border-[#b79262]/40 hover:text-neutral-300"
@@ -222,7 +224,7 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-8 border px-3 text-[9px] font-bold uppercase tracking-[0.16em] transition-all duration-150 active:scale-[0.97] ${
+      className={`min-h-8 min-w-[84px] border px-3 text-[9px] font-bold uppercase tracking-[0.16em] transition-all duration-150 active:scale-[0.97] ${
         active
           ? "border-[#b79262]/70 bg-[#b79262]/10 text-[#f2ca50]"
           : "border-white/[0.07] text-neutral-600 hover:border-white/20 hover:text-neutral-400"

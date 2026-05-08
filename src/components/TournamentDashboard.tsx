@@ -435,7 +435,7 @@ function LichessTournamentDashboard({
                 <div className="flex items-center gap-3">
                   <span className="h-1.5 w-1.5 rotate-45 bg-[#b79262]" />
                   <h2 className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50]">
-                    {selectedPlayerId ? `Matches — ${selectedPlayerId}` : "Archived games"}
+                    {selectedPlayerId ? `Matches — ${selectedPlayerId}` : "Arena games"}
                   </h2>
                 </div>
                 {selectedPlayerId && (
@@ -522,7 +522,7 @@ function formatFixturePlayerName(playerId: string, players: Parameters<typeof ge
 
 function SummaryChip({ label, value }: { label: string; value: string }) {
   return (
-    <div className="ring-1 ring-white/[0.06] bg-[#0f0f0f] px-3 py-3">
+    <div className="flex-1 min-w-[100px] ring-1 ring-white/[0.06] bg-[#0f0f0f] px-3 py-3 text-center">
       <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-600">{label}</p>
       <p className="mt-1 truncate text-sm font-semibold text-neutral-300">{value}</p>
     </div>

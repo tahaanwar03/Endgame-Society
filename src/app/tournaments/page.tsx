@@ -11,7 +11,7 @@ export default function TournamentsPage() {
             Endgame Society
           </p>
           <h1 className="mt-2 font-serif text-4xl uppercase tracking-[0.04em] text-gold-gradient leading-tight md:text-5xl">
-            Tournament Archive
+            Tournament Arena
           </h1>
         </div>
         <TournamentList />
