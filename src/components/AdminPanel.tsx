@@ -113,7 +113,7 @@ export function AdminPanel() {
     }
 
     if (screen === "lichess-sync") {
-      return <LichesSyncScreen onDone={setMessage} />;
+      return <LichessSyncScreen onDone={setMessage} />;
     }
 
     if (screen === "tournaments") {
@@ -1679,7 +1679,7 @@ type SyncResult = {
   tournamentIds: string[];
 };
 
-function LichesSyncScreen({ onDone }: { onDone: (message: string) => void }) {
+function LichessSyncScreen({ onDone }: { onDone: (message: string) => void }) {
   const [status, setStatus] = useState<SyncStatus>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [tournamentIds, setTournamentIds] = useState<string[]>([]);
@@ -1691,9 +1691,9 @@ function LichesSyncScreen({ onDone }: { onDone: (message: string) => void }) {
 
   async function getIdToken() {
     const user = auth.user;
-    if (!user) throw new Error("Not authenticated");
+    if (!user) throw new Error("Local session not ready. Please try clicking the tab again.");
     const { getIdToken: getToken } = await import("firebase/auth");
-    return getToken(user, /* forceRefresh */ false);
+    return getToken(user, /* forceRefresh */ true);
   }
 
   // Load registry on mount
