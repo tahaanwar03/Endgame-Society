@@ -68,15 +68,13 @@ export type LichessTournamentGame = {
 };
 
 const API_BASE = "https://lichess.org";
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 2;
+// Per-request timeout — prevents any single Lichess call from hanging forever
+const REQUEST_TIMEOUT_MS = 12_000;
 
 function getToken() {
   const token = process.env.LICHESS_API_TOKEN;
-
-  if (!token) {
-    throw new Error("LICHESS_API_TOKEN is not configured.");
-  }
-
+  if (!token) throw new Error("LICHESS_API_TOKEN is not configured.");
   return token;
 }
 
@@ -89,9 +87,13 @@ async function fetchWithRetry(path: string, init?: RequestInit) {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
     try {
       const response = await fetch(`${API_BASE}${path}`, {
         ...init,
+        signal: controller.signal,
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
@@ -99,32 +101,31 @@ async function fetchWithRetry(path: string, init?: RequestInit) {
         },
         cache: "no-store"
       });
+      clearTimeout(timer);
 
-      if (response.status === 404) {
-        return response;
-      }
+      if (response.status === 404) return response;
+      if (response.ok) return response;
 
-      if (response.ok) {
-        return response;
-      }
-
+      // Rate limited — wait briefly then retry (never 60s, max 5s)
       if (response.status === 429 && attempt < MAX_ATTEMPTS) {
-        const retryAfter = Number(response.headers.get("retry-after") ?? "");
-        await delay(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 60_000);
+        await delay(5_000);
         continue;
       }
 
       if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
-        await delay(500 * 2 ** (attempt - 1));
+        await delay(1_000);
         continue;
       }
 
-      throw new Error(`Lichess request failed: ${response.status} ${response.statusText} (${path})`);
+      throw new Error(`Lichess API error: ${response.status} (${path})`);
     } catch (error) {
+      clearTimeout(timer);
       lastError = error instanceof Error ? error : new Error("Unknown Lichess request failure.");
-
+      if ((error as Error)?.name === "AbortError") {
+        throw new Error(`Lichess request timed out after ${REQUEST_TIMEOUT_MS / 1000}s: ${path}`);
+      }
       if (attempt < MAX_ATTEMPTS) {
-        await delay(500 * 2 ** (attempt - 1));
+        await delay(1_000);
         continue;
       }
     }
@@ -286,7 +287,8 @@ export async function fetchUserGames(username: string) {
 }
 
 export async function fetchUserCreatedTournaments(username: string) {
-  const text = await fetchText(`/api/user/${encodeURIComponent(username)}/tournament/created`, "application/x-ndjson");
+  // Limit to 30 most recent to avoid huge NDJSON payloads
+  const text = await fetchText(`/api/user/${encodeURIComponent(username)}/tournament/created?max=30`, "application/x-ndjson");
   const parsed = parseNdjson<LichessCreatedTournamentApiResponse>(text);
 
   return parsed

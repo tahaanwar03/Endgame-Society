@@ -1,6 +1,6 @@
 import "server-only";
 
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, WriteBatch } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
 import {
   fetchGamesPgnBulk,
@@ -23,6 +23,9 @@ type SyncRegistry = {
   tournamentIds: string[];
   creatorUsernames: string[];
 };
+
+// Hard wall-clock budget: stop processing new tournaments after this many ms
+const SYNC_TIME_BUDGET_MS = 50_000;
 
 function slugifyTournamentId(name: string, lichessId: string) {
   return `${name}-${lichessId}`
@@ -49,7 +52,6 @@ function pgnResultToScore(pgn: string): Game["result"] {
 async function readSyncRegistry() {
   const db = getAdminDb();
   const snapshot = await db.doc("sync_config/lichess").get();
-
   const envTournamentIds = parseEnvList(process.env.LICHESS_TOURNAMENT_IDS);
   const envCreatorUsernames = parseEnvList(process.env.LICHESS_TOURNAMENT_CREATORS);
 
@@ -85,7 +87,7 @@ async function resolveTournamentIds() {
     }
   }
 
-  // Re-include already-stored not-yet-finished tournaments
+  // Re-queue active tournaments already in Firestore
   const existing = await db.collection("tournaments").where("source", "==", "lichess").get();
   for (const doc of existing.docs) {
     const lichessId = doc.get("lichessId");
@@ -100,6 +102,18 @@ async function resolveTournamentIds() {
 
 function normalizeStandings(entries: TournamentStandingSnapshot[]) {
   return entries.map((e) => ({ userId: e.userId, username: e.username, score: e.score, rank: e.rank }));
+}
+
+/** Commits a Firestore WriteBatch in chunks of max 400 to stay under the 500-write limit */
+async function commitInChunks(db: ReturnType<typeof getAdminDb>, writes: Array<{ ref: FirebaseFirestore.DocumentReference; data: object }>) {
+  const CHUNK = 400;
+  for (let i = 0; i < writes.length; i += CHUNK) {
+    const batch: WriteBatch = db.batch();
+    for (const w of writes.slice(i, i + CHUNK)) {
+      batch.set(w.ref as FirebaseFirestore.DocumentReference, w.data, { merge: true });
+    }
+    await batch.commit();
+  }
 }
 
 async function upsertTournament(tournamentId: string) {
@@ -144,52 +158,40 @@ async function upsertTournament(tournamentId: string) {
     );
   }
 
-  // Fetch all game metadata first
+  // If tournament is frozen (finished + already synced), skip games
+  if (isFrozen) {
+    return { deterministicId, gamesProcessed: 0 };
+  }
+
   const games = await fetchTournamentGames(tournamentId);
+  if (games.length === 0) return { deterministicId, gamesProcessed: 0 };
 
-  // Find which games still need PGN (not already in DB)
-  const neededGameIds: string[] = [];
-  for (const game of games) {
-    const snap = await db.collection("games").doc(game.gameId).get();
-    if (!snap.exists || !snap.get("movesPgn")) {
-      neededGameIds.push(game.gameId);
-    }
-  }
+  // ONE bulk request for all PGNs — no per-game HTTP calls
+  const allGameIds = games.map((g) => g.gameId);
+  const pgnMap = await fetchGamesPgnBulk(allGameIds);
 
-  let gamesProcessed = 0;
+  const writes = games.map((game) => {
+    const pgn = pgnMap.get(game.gameId) ?? "";
+    return {
+      ref: db.collection("games").doc(game.gameId),
+      data: {
+        id: game.gameId,
+        tournamentId: deterministicId,
+        lichessGameId: game.gameId,
+        white: game.white,
+        black: game.black,
+        result: pgn ? pgnResultToScore(pgn) : "1/2-1/2",
+        movesPgn: pgn,
+        status: "finished",
+        createdAt: game.createdAt ? Timestamp.fromDate(game.createdAt) : null,
+        lastSyncedAt: FieldValue.serverTimestamp()
+      }
+    };
+  });
 
-  if (neededGameIds.length > 0) {
-    // ONE bulk API call instead of one per game
-    const pgnMap = await fetchGamesPgnBulk(neededGameIds);
+  await commitInChunks(db, writes);
 
-    const batch = db.batch();
-    for (const game of games) {
-      if (!neededGameIds.includes(game.gameId)) continue;
-      const pgn = pgnMap.get(game.gameId) ?? "";
-      const gameRef = db.collection("games").doc(game.gameId);
-      batch.set(
-        gameRef,
-        {
-          id: game.gameId,
-          tournamentId: deterministicId,
-          lichessGameId: game.gameId,
-          white: game.white,
-          black: game.black,
-          result: pgn ? pgnResultToScore(pgn) : "1/2-1/2",
-          movesPgn: pgn,
-          status: "finished",
-          createdAt: game.createdAt ? Timestamp.fromDate(game.createdAt) : null,
-          lastSyncedAt: FieldValue.serverTimestamp()
-        },
-        { merge: true }
-      );
-      gamesProcessed++;
-    }
-    // Firestore batch max is 500 writes
-    await batch.commit();
-  }
-
-  return { deterministicId, gamesProcessed };
+  return { deterministicId, gamesProcessed: writes.length };
 }
 
 export async function runLichessSync(): Promise<SyncRunResult> {
@@ -200,13 +202,20 @@ export async function runLichessSync(): Promise<SyncRunResult> {
     tournamentIds = await resolveTournamentIds();
   } catch (e) {
     console.error("Critical: Could not resolve tournament IDs:", e);
-    return { runId: "failed", tournamentsProcessed: 0, gamesProcessed: 0, errors: ["Registry load failed"], tournamentIds: [] };
+    return {
+      runId: "failed",
+      tournamentsProcessed: 0,
+      gamesProcessed: 0,
+      errors: ["Registry load failed: " + (e instanceof Error ? e.message : String(e))],
+      tournamentIds: []
+    };
   }
 
   const runRef = db.collection("sync_logs").doc();
   const errors: string[] = [];
   let tournamentsProcessed = 0;
   let gamesProcessed = 0;
+  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
 
   await runRef.set({
     startedAt: FieldValue.serverTimestamp(),
@@ -217,10 +226,13 @@ export async function runLichessSync(): Promise<SyncRunResult> {
     tournamentIds
   });
 
-  // Process up to 10 tournaments per run — each is now a tiny number of API calls
-  const batch = tournamentIds.slice(0, 10);
+  for (const tournamentId of tournamentIds) {
+    // Stop before we hit the time limit so we can still write the log
+    if (Date.now() > deadline) {
+      errors.push(`Time budget reached. ${tournamentIds.length - tournamentsProcessed} tournaments deferred to next run.`);
+      break;
+    }
 
-  for (const tournamentId of batch) {
     try {
       const result = await upsertTournament(tournamentId);
       tournamentsProcessed++;
