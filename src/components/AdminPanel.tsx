@@ -906,8 +906,7 @@ function TournamentStagesForm({
               round: activeStage.round,
               group_id: firstGroup,
               player1_id: "",
-              player2_id: "",
-              result: null
+              player2_id: ""
             });
             onOpenMatch(id);
           }}
