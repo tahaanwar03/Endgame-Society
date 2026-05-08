@@ -1126,7 +1126,7 @@ function LichessSyncScreen({ onDone }: { onDone: (message: string) => void }) {
       <section className="relative ring-1 ring-white/[0.05] bg-[#0f0f0f] p-8 md:p-10">
         <h2 className="font-serif text-3xl text-neutral-200">Network Uplink</h2>
         <p className="mt-4 text-sm text-neutral-400 font-sans max-w-2xl leading-relaxed">
-          Configure the society's bridge to Lichess. All tournaments created by authorized commanders will be automatically mirrored into the society archives.
+          Configure the society&apos;s bridge to Lichess. All tournaments created by authorized commanders will be automatically mirrored into the society archives.
         </p>
       </section>
 
