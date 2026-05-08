@@ -3,7 +3,7 @@ import "server-only";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
 import {
-  fetchGamePgn,
+  fetchGamesPgnBulk,
   fetchTournamentData,
   fetchTournamentGames,
   fetchTournamentResults,
@@ -42,11 +42,7 @@ function parseEnvList(value: string | undefined) {
 function pgnResultToScore(pgn: string): Game["result"] {
   const match = pgn.match(/\[Result "([^"]+)"\]/);
   const result = match?.[1];
-
-  if (result === "1-0" || result === "0-1" || result === "1/2-1/2") {
-    return result;
-  }
-
+  if (result === "1-0" || result === "0-1" || result === "1/2-1/2") return result;
   return "1/2-1/2";
 }
 
@@ -58,14 +54,13 @@ async function readSyncRegistry() {
   const envCreatorUsernames = parseEnvList(process.env.LICHESS_TOURNAMENT_CREATORS);
 
   if (!snapshot.exists) {
-    return {
-      tournamentIds: envTournamentIds,
-      creatorUsernames: envCreatorUsernames
-    } satisfies SyncRegistry;
+    return { tournamentIds: envTournamentIds, creatorUsernames: envCreatorUsernames } satisfies SyncRegistry;
   }
 
   const data = snapshot.data() ?? {};
-  const tournamentIds = Array.isArray(data.tournamentIds) ? data.tournamentIds.filter((item): item is string => typeof item === "string") : [];
+  const tournamentIds = Array.isArray(data.tournamentIds)
+    ? data.tournamentIds.filter((item): item is string => typeof item === "string")
+    : [];
   const creatorUsernames = Array.isArray(data.creatorUsernames)
     ? data.creatorUsernames.filter((item): item is string => typeof item === "string")
     : [];
@@ -81,26 +76,20 @@ async function resolveTournamentIds() {
   const registry = await readSyncRegistry();
   const tournamentIds = new Set(registry.tournamentIds);
 
-  if (registry.creatorUsernames.length > 0) {
-    for (const username of registry.creatorUsernames) {
-      try {
-        const created = await fetchUserCreatedTournaments(username);
-        for (const tournament of created) {
-          tournamentIds.add(tournament.lichessId);
-        }
-      } catch (err) {
-        console.error(`Failed to resolve tournaments for ${username}:`, err);
-      }
+  for (const username of registry.creatorUsernames) {
+    try {
+      const created = await fetchUserCreatedTournaments(username);
+      for (const t of created) tournamentIds.add(t.lichessId);
+    } catch (err) {
+      console.error(`Failed to resolve tournaments for ${username}:`, err);
     }
   }
 
-  // Also include any tournaments already in our DB that aren't finished
+  // Re-include already-stored not-yet-finished tournaments
   const existing = await db.collection("tournaments").where("source", "==", "lichess").get();
-
-  for (const document of existing.docs) {
-    const lichessId = document.get("lichessId");
-    const status = document.get("status");
-
+  for (const doc of existing.docs) {
+    const lichessId = doc.get("lichessId");
+    const status = doc.get("status");
     if (typeof lichessId === "string" && (status === "created" || status === "ongoing")) {
       tournamentIds.add(lichessId);
     }
@@ -110,12 +99,7 @@ async function resolveTournamentIds() {
 }
 
 function normalizeStandings(entries: TournamentStandingSnapshot[]) {
-  return entries.map((entry) => ({
-    userId: entry.userId,
-    username: entry.username,
-    score: entry.score,
-    rank: entry.rank
-  }));
+  return entries.map((e) => ({ userId: e.userId, username: e.username, score: e.score, rank: e.rank }));
 }
 
 async function upsertTournament(tournamentId: string) {
@@ -123,17 +107,9 @@ async function upsertTournament(tournamentId: string) {
   const tournament = await fetchTournamentData(tournamentId);
 
   if (!tournament) {
-    // If it's in our DB but gone from Lichess, archive it
     const existing = await db.collection("tournaments").where("lichessId", "==", tournamentId).limit(1).get();
-
     if (!existing.empty) {
-      await existing.docs[0].ref.set(
-        {
-          status: "archived",
-          lastSyncedAt: FieldValue.serverTimestamp()
-        },
-        { merge: true }
-      );
+      await existing.docs[0].ref.set({ status: "archived", lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
     }
     return { deterministicId: tournamentId, gamesProcessed: 0 };
   }
@@ -141,11 +117,8 @@ async function upsertTournament(tournamentId: string) {
   const standings = await fetchTournamentResults(tournamentId);
   const deterministicId = slugifyTournamentId(tournament.name, tournament.lichessId);
   const tournamentRef = db.collection("tournaments").doc(deterministicId);
-  const existingSnapshot = await tournamentRef.get();
-  const existingStatus = existingSnapshot.get("status");
-  
-  // If both Lichess and our DB say it's finished, we only sync standings once more then freeze metadata
-  const isFrozen = existingStatus === "finished" && tournament.status === "finished";
+  const existingSnap = await tournamentRef.get();
+  const isFrozen = existingSnap.get("status") === "finished" && tournament.status === "finished";
 
   if (!isFrozen) {
     await tournamentRef.set(
@@ -171,26 +144,31 @@ async function upsertTournament(tournamentId: string) {
     );
   }
 
-  // Sync games — we limit to 100 per sync to avoid timeouts
+  // Fetch all game metadata first
   const games = await fetchTournamentGames(tournamentId);
-  let gamesProcessed = 0;
-  const maxGamesPerTournament = 100;
 
+  // Find which games still need PGN (not already in DB)
+  const neededGameIds: string[] = [];
   for (const game of games) {
-    if (gamesProcessed >= maxGamesPerTournament) break;
-
-    const gameRef = db.collection("games").doc(game.gameId);
-    const gameSnapshot = await gameRef.get();
-
-    // Skip if we already have the PGN
-    if (gameSnapshot.exists && gameSnapshot.get("movesPgn")) {
-      continue;
+    const snap = await db.collection("games").doc(game.gameId).get();
+    if (!snap.exists || !snap.get("movesPgn")) {
+      neededGameIds.push(game.gameId);
     }
+  }
 
-    try {
-      const pgn = await fetchGamePgn(game.gameId);
+  let gamesProcessed = 0;
 
-      await gameRef.set(
+  if (neededGameIds.length > 0) {
+    // ONE bulk API call instead of one per game
+    const pgnMap = await fetchGamesPgnBulk(neededGameIds);
+
+    const batch = db.batch();
+    for (const game of games) {
+      if (!neededGameIds.includes(game.gameId)) continue;
+      const pgn = pgnMap.get(game.gameId) ?? "";
+      const gameRef = db.collection("games").doc(game.gameId);
+      batch.set(
+        gameRef,
         {
           id: game.gameId,
           tournamentId: deterministicId,
@@ -198,17 +176,17 @@ async function upsertTournament(tournamentId: string) {
           white: game.white,
           black: game.black,
           result: pgn ? pgnResultToScore(pgn) : "1/2-1/2",
-          movesPgn: pgn || "",
+          movesPgn: pgn,
           status: "finished",
           createdAt: game.createdAt ? Timestamp.fromDate(game.createdAt) : null,
           lastSyncedAt: FieldValue.serverTimestamp()
         },
         { merge: true }
       );
-      gamesProcessed += 1;
-    } catch (e) {
-      console.error(`Failed to sync game ${game.gameId}:`, e);
+      gamesProcessed++;
     }
+    // Firestore batch max is 500 writes
+    await batch.commit();
   }
 
   return { deterministicId, gamesProcessed };
@@ -217,6 +195,7 @@ async function upsertTournament(tournamentId: string) {
 export async function runLichessSync(): Promise<SyncRunResult> {
   const db = getAdminDb();
   let tournamentIds: string[] = [];
+
   try {
     tournamentIds = await resolveTournamentIds();
   } catch (e) {
@@ -238,36 +217,25 @@ export async function runLichessSync(): Promise<SyncRunResult> {
     tournamentIds
   });
 
-  // Limit sync to 15 tournaments at a time to stay under timeouts
-  const batch = tournamentIds.slice(0, 15);
+  // Process up to 10 tournaments per run — each is now a tiny number of API calls
+  const batch = tournamentIds.slice(0, 10);
 
   for (const tournamentId of batch) {
     try {
       const result = await upsertTournament(tournamentId);
-      tournamentsProcessed += 1;
+      tournamentsProcessed++;
       gamesProcessed += result.gamesProcessed;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : `Unknown sync error for ${tournamentId}.`;
+      const msg = error instanceof Error ? error.message : `Unknown error for ${tournamentId}`;
       console.error(msg);
       errors.push(msg);
     }
   }
 
   await runRef.set(
-    {
-      finishedAt: FieldValue.serverTimestamp(),
-      tournamentsProcessed,
-      gamesProcessed,
-      errors
-    },
+    { finishedAt: FieldValue.serverTimestamp(), tournamentsProcessed, gamesProcessed, errors },
     { merge: true }
   );
 
-  return {
-    runId: runRef.id,
-    tournamentsProcessed,
-    gamesProcessed,
-    errors,
-    tournamentIds
-  };
+  return { runId: runRef.id, tournamentsProcessed, gamesProcessed, errors, tournamentIds };
 }

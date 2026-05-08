@@ -243,6 +243,44 @@ export async function fetchGamePgn(gameId: string) {
   return fetchText(`/game/export/${gameId}`, "application/x-chess-pgn");
 }
 
+/**
+ * Bulk-fetch PGNs for multiple games in a single API call.
+ * Returns a map of gameId -> pgn string.
+ */
+export async function fetchGamesPgnBulk(gameIds: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (gameIds.length === 0) return result;
+
+  const token = getToken();
+  const response = await fetch(`${API_BASE}/api/games/export/_ids`, {
+    method: "POST",
+    headers: {
+      Accept: "application/x-chess-pgn",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "text/plain"
+    },
+    body: gameIds.join(","),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Bulk PGN fetch failed: ${response.status}`);
+  }
+
+  const text = await response.text();
+  // Split on double-newline between PGN games
+  const games = text.split(/\n\n\[/).map((g, i) => (i === 0 ? g : "[" + g));
+
+  for (const pgn of games) {
+    const idMatch = pgn.match(/\[Site "https:\/\/lichess\.org\/([^"]+)"\]/);
+    if (idMatch?.[1]) {
+      result.set(idMatch[1], pgn);
+    }
+  }
+
+  return result;
+}
+
 export async function fetchUserGames(username: string) {
   return fetchText(`/api/games/user/${encodeURIComponent(username)}`, "application/x-ndjson");
 }
