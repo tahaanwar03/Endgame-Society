@@ -208,7 +208,7 @@ function TypeTab({ active, onClick, children }: { active: boolean; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-10 min-w-[140px] px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] first:border-r-0 border ${
+      className={`flex-1 min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] first:border-r-0 border ${
         active
           ? "border-[#b79262] bg-[#b79262]/10 text-[#f2ca50]"
           : "border-white/[0.08] text-neutral-500 hover:border-[#b79262]/40 hover:text-neutral-300"

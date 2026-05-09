@@ -167,7 +167,13 @@ export function computeStandings(players: Player[], matches: Match[]): Standing[
 export function getTournamentPlayersByGroup(tournament: Tournament, players: Player[]) {
   const rosterSet = new Set(tournament.player_ids);
   const rosterPlayers = players.filter((player) => rosterSet.has(player.id));
-  const groupCodes = getGroupStage(tournament)?.groups ?? [];
+
+  // Aggregate group codes from ALL group-type stages (not just the first one)
+  const groupCodes = tournament.stages
+    .filter((stage) => stage.type === "group")
+    .flatMap((stage) => stage.groups ?? [])
+    .filter((code, index, arr) => arr.indexOf(code) === index); // deduplicate
+
   const grouped = new Map<string, Player[]>();
 
   for (const groupCode of groupCodes) {

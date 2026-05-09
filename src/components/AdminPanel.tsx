@@ -203,7 +203,7 @@ export function AdminPanel() {
   return (
     <main className="mx-auto max-w-container px-4 py-8 md:px-8 md:py-16">
       {/* Header Section */}
-      <section className="mb-12 flex flex-col gap-6 md:flex-row md:items-end md:justify-between animate-in fade-in slide-in-from-top-4 duration-1000">
+      <section className="mb-12 flex flex-col gap-6 md:flex-row md:items-end md:justify-between animate-fade-up in-view">
         <div className="relative pl-6">
           <div className="absolute left-0 top-0 h-full w-[1px] bg-gradient-to-b from-[#b79262] via-[#b79262]/20 to-transparent" />
           <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-neutral-500 font-sans">
@@ -275,7 +275,7 @@ export function AdminPanel() {
         </div>
       ) : null}
 
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="animate-fade-up in-view">
         {renderScreen()}
       </div>
     </main>
@@ -620,7 +620,7 @@ function TournamentDetailScreen({
   const [activeTab, setActiveTab] = useState<"settings" | "roster" | "brackets">("brackets");
 
   return (
-    <section className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+    <section className="space-y-10 animate-fade-up in-view">
       <div className="flex flex-wrap gap-2 border-b border-white/[0.05]">
         <NavButton label="Event Protocol" active={activeTab === "brackets"} onClick={() => setActiveTab("brackets")} />
         <NavButton label="Competitor Roster" active={activeTab === "roster"} onClick={() => setActiveTab("roster")} />
@@ -891,7 +891,7 @@ function TournamentStagesForm({
   const stageMatches = matches.filter((m) => m.stage_id === activeStage.id);
 
   return (
-    <section className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-700">
+    <section className="space-y-10 animate-fade-up in-view">
       <div className="flex flex-col gap-6 md:flex-row md:items-end justify-between">
         <div className="flex flex-wrap gap-2">
           {tournament.stages.map((stage) => (
@@ -990,7 +990,7 @@ function MatchDetailScreen({
   const eligiblePlayers = players.filter(p => tournament.player_ids.includes(p.id));
 
   return (
-    <section className="mx-auto max-w-2xl ring-1 ring-white/[0.08] bg-[#0b0b0b] p-8 md:p-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+    <section className="mx-auto max-w-2xl ring-1 ring-white/[0.08] bg-[#0b0b0b] p-8 md:p-12 animate-fade-up in-view">
       <div className="mb-10 text-center">
         <h2 className="font-serif text-3xl text-neutral-200">Encounter Analysis</h2>
         <p className="text-[10px] uppercase tracking-[0.2em] text-[#b79262] font-bold mt-2">Adjusting Match Record</p>
