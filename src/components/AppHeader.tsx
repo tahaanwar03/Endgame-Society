@@ -74,7 +74,7 @@ export function AppHeader() {
             onClick={() => setMenuOpen(false)}
             className="fixed inset-0 top-16 z-40 bg-black/50 md:hidden"
           />
-          <div className="absolute inset-x-0 top-16 z-50 border-b border-[#221d14] bg-[#080808]/98 px-4 py-4 shadow-[0_18px_48px_rgba(0,0,0,0.6)] md:hidden">
+          <div className="absolute inset-x-0 top-16 z-50 border-b border-[#221d14] bg-[#080808] px-4 py-4 shadow-[0_18px_48px_rgba(0,0,0,0.8)] md:hidden">
             <nav className="grid gap-2">
               {links.map((link) => {
                 const active = pathname.startsWith(link.href);
@@ -86,7 +86,7 @@ export function AppHeader() {
                     className={`flex min-h-12 items-center justify-between border px-4 text-xs font-bold uppercase tracking-[0.16em] transition-colors duration-150 ${
                       active
                         ? "border-[#b79262] bg-[#b79262]/10 text-[#f2ca50]"
-                        : "border-[#1e1e1e] bg-[#0f0f0f] text-neutral-400 hover:border-[#b79262]/30 hover:text-neutral-200"
+                        : "border-[#1e1e1e] bg-[#0a0a0a] text-neutral-400 hover:border-[#b79262]/30 hover:text-neutral-200"
                     }`}
                   >
                     <span>{link.label}</span>

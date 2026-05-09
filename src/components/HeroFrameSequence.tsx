@@ -26,6 +26,7 @@ export function HeroFrameSequence() {
   const footerRef = useRef<HTMLDivElement | null>(null);
   const loadingContainerRef = useRef<HTMLDivElement | null>(null);
   const loadingProgressRef = useRef<HTMLDivElement | null>(null);
+  const loadingSubtitleRef = useRef<HTMLParagraphElement | null>(null);
 
   useEffect(() => {
     let cleanup = () => {};
@@ -299,6 +300,22 @@ export function HeroFrameSequence() {
     // Prevent scrolling while loading
     document.body.style.overflow = "hidden";
 
+    // Cycle subtitle phrases during load
+    const subtitlePhrases = ["Setting up the board", "Assembling the pieces."];
+    let subtitleIndex = 0;
+    const subtitleInterval = window.setInterval(() => {
+      subtitleIndex = (subtitleIndex + 1) % subtitlePhrases.length;
+      if (loadingSubtitleRef.current) {
+        loadingSubtitleRef.current.style.opacity = "0";
+        setTimeout(() => {
+          if (loadingSubtitleRef.current) {
+            loadingSubtitleRef.current.textContent = subtitlePhrases[subtitleIndex];
+            loadingSubtitleRef.current.style.opacity = "1";
+          }
+        }, 300);
+      }
+    }, 1800);
+
     const pollInterval = window.setInterval(() => {
       if (!active) {
         clearInterval(pollInterval);
@@ -314,6 +331,7 @@ export function HeroFrameSequence() {
         clearInterval(pollInterval);
         
         // Unlock scroll & fade out loader
+        clearInterval(subtitleInterval);
         document.body.style.overflow = "";
         if (loadingContainerRef.current) {
           loadingContainerRef.current.style.opacity = "0";
@@ -329,6 +347,7 @@ export function HeroFrameSequence() {
 
     return () => {
       clearInterval(pollInterval);
+      clearInterval(subtitleInterval);
       document.body.style.overflow = "";
       cleanup();
     };
@@ -380,23 +399,37 @@ export function HeroFrameSequence() {
       <div className="pointer-events-none absolute inset-0 z-20 bg-[linear-gradient(90deg,rgba(0,0,0,0.28)_0%,transparent_12%,rgba(188,147,95,0.08)_50%,transparent_88%,rgba(0,0,0,0.24)_100%)]" />
       <div className="pointer-events-none absolute inset-0 z-20 opacity-70 [background-image:linear-gradient(rgba(183,146,98,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(183,146,98,0.06)_1px,transparent_1px)] [background-position:center] [background-size:160px_160px]" />
 
-      {/* Loading Overlay State */}
+      {/* ── Full-page preloader — fixed, sits ABOVE everything ──────────── */}
       <div
         ref={loadingContainerRef}
-        className="absolute inset-0 z-[25] flex flex-col items-center justify-center bg-black transition-opacity duration-700 ease-in-out will-change-[opacity]"
+        className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-black transition-opacity duration-700 ease-in-out will-change-[opacity]"
       >
-        <div className="flex w-64 flex-col items-center gap-5">
-          <p className="font-serif text-[1.2rem] uppercase tracking-[0.1em] text-neutral-200 opacity-90 drop-shadow-md">
-            Initializing Sector
+        {/* Gold grid texture identical to hero */}
+        <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(183,146,98,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(183,146,98,0.07)_1px,transparent_1px)] [background-size:160px_160px]" />
+
+        <div className="relative flex w-72 flex-col items-center gap-6 px-4">
+          {/* Diamond glyph */}
+          <span className="mb-2 block h-3 w-3 rotate-45 border border-[#b79262]/60" />
+
+          {/* Heading */}
+          <p className="font-serif text-[1.6rem] uppercase tracking-[0.12em] text-neutral-100">
+            Greetings!
           </p>
-          <div className="h-[1px] w-full overflow-hidden bg-white/10 relative">
+
+          {/* Gold progress bar */}
+          <div className="h-px w-full overflow-hidden bg-white/10 relative">
             <div
               ref={loadingProgressRef}
               className="absolute left-0 top-0 h-full w-0 bg-gradient-to-r from-[#b79262] via-[#dca971] to-[#b79262] transition-all duration-300 ease-out"
             />
           </div>
-          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b79262]/60 animate-pulse">
-            Pre-calculating optics
+
+          {/* Cycling subtitle */}
+          <p
+            ref={loadingSubtitleRef}
+            className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#b79262]/70 transition-opacity duration-300"
+          >
+            Setting up the board
           </p>
         </div>
       </div>
