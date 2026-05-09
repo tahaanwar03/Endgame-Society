@@ -34,28 +34,28 @@ function formatDate(dateStr: string | undefined | null): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-/* Very small hook — uses IntersectionObserver to add .in-view class.
-   This triggers the CSS animation-play-state without any scroll listener. */
-function useInViewAnimation(ref: React.RefObject<Element | null>) {
+function AnimatedCard({ children, delay }: { children: ReactNode; delay: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // rootMargin compensates for the animation's translateY(20px) from-state,
+    // which shifts the visual bounding box and would otherwise fool the observer
+    // into thinking edge-of-viewport cards are out of view.
     const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { el.classList.add("in-view"); observer.disconnect(); } },
-      { threshold: 0.08 }
+      ([entry]) => { if (entry.isIntersecting) { setInView(true); observer.disconnect(); } },
+      { threshold: 0, rootMargin: "30px" }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref]);
-}
+  }, []);
 
-function AnimatedCard({ children, delay }: { children: ReactNode; delay: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useInViewAnimation(ref as React.RefObject<Element>);
   return (
     <div
       ref={ref}
-      className={`h-full animate-fade-up delay-${delay}`}
+      className={`h-full animate-fade-up delay-${delay}${inView ? " in-view" : ""}`}
     >
       {children}
     </div>
@@ -146,7 +146,7 @@ export function TournamentList() {
       ) : (
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {filteredAndSorted.map((tournament, i) => (
-            <AnimatedCard key={tournament.id} delay={delays[Math.min(i, delays.length - 1)]}>
+            <AnimatedCard key={`${tournament.id}-${sourceFilter}-${timeControlFilter}`} delay={delays[Math.min(i, delays.length - 1)]}>
               {/* Double-Bezel card */}
               <Link
                 href={`/tournaments/${encodeURIComponent(tournament.id)}`}
