@@ -173,6 +173,7 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                   {group.standings.length === 0 ? (
                     <div className="p-6 text-sm text-neutral-600">No completed group matches yet.</div>
                   ) : (
+                  <div className="overflow-x-auto">
                     <table className="w-full table-fixed text-left text-[11px] md:text-sm">
                       <thead className="bg-[#0d0d0d] text-[9px] uppercase tracking-[0.14em] text-neutral-600 md:text-[10px]">
                         <tr>
@@ -206,6 +207,7 @@ export function TournamentDashboard({ tournamentId }: { tournamentId: string }) 
                         ))}
                       </tbody>
                     </table>
+                  </div>
                   )}
                 </div>
               </AnimatedSection>
@@ -396,6 +398,7 @@ function LichessTournamentDashboard({
             {tournament.standings.length === 0 ? (
               <p className="p-6 text-sm text-neutral-600">No standings snapshot has been synced yet.</p>
             ) : (
+            <div className="overflow-x-auto">
               <table className="w-full table-fixed text-left text-[11px] md:text-sm">
                 <thead className="bg-[#0d0d0d] text-[9px] uppercase tracking-[0.14em] text-neutral-600 md:text-[10px]">
                   <tr>
@@ -421,6 +424,7 @@ function LichessTournamentDashboard({
                   ))}
                 </tbody>
               </table>
+            </div>
             )}
           </div>
         </AnimatedSection>

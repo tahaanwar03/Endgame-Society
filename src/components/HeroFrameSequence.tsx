@@ -366,7 +366,7 @@ export function HeroFrameSequence() {
         Uses a subtle animated gradient to simulate the "assembly glow" progression.
       */}
       <div
-        className="pointer-events-none absolute inset-0 z-15"
+        className="pointer-events-none absolute inset-0 z-[15]"
         style={{
           background:
             "radial-gradient(ellipse 60% 40% at 50% 55%, rgba(219,164,88,0.07) 0%, transparent 70%)",
@@ -383,7 +383,7 @@ export function HeroFrameSequence() {
       {/* Loading Overlay State */}
       <div
         ref={loadingContainerRef}
-        className="absolute inset-0 z-25 flex flex-col items-center justify-center bg-black transition-opacity duration-700 ease-in-out will-change-opacity"
+        className="absolute inset-0 z-[25] flex flex-col items-center justify-center bg-black transition-opacity duration-700 ease-in-out will-change-[opacity]"
       >
         <div className="flex w-64 flex-col items-center gap-5">
           <p className="font-serif text-[1.2rem] uppercase tracking-[0.1em] text-neutral-200 opacity-90 drop-shadow-md">

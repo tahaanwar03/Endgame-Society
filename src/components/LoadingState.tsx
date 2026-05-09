@@ -2,21 +2,22 @@
 
 import { useEffect, useState } from "react";
 
+const CHESS_EMOJIS = ["♔", "♕", "♖", "♗", "♘", "♙"] as const;
+
 export function LoadingState({ label = "Syncing portal data" }: { label?: string }) {
   const [index, setIndex] = useState(0);
-  const emojis = ["♔", "♕", "♖", "♗", "♘", "♙"];
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setIndex((i) => (i + 1) % emojis.length);
+      setIndex((i) => (i + 1) % CHESS_EMOJIS.length);
     }, 200);
     return () => clearInterval(timer);
-  }, [emojis.length]);
+  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center py-20">
       <div className="text-3xl text-[#b79262] transition-all duration-200">
-        {emojis[index]}
+        {CHESS_EMOJIS[index]}
       </div>
       <p className="mt-6 text-[10px] font-bold uppercase tracking-[0.24em] text-neutral-600">
         {label}
