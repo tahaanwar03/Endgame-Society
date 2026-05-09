@@ -24,6 +24,8 @@ export function HeroFrameSequence() {
   const introRef = useRef<HTMLDivElement | null>(null);
   const messagingRef = useRef<HTMLDivElement | null>(null);
   const footerRef = useRef<HTMLDivElement | null>(null);
+  const loadingContainerRef = useRef<HTMLDivElement | null>(null);
+  const loadingProgressRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cleanup = () => {};
@@ -210,6 +212,7 @@ export function HeroFrameSequence() {
       messaging.style.opacity = "0";
       footer.style.opacity = "1";
       footer.style.transform = "translateY(0)";
+      if (loadingContainerRef.current) loadingContainerRef.current.style.display = "none";
 
       cleanup = () => {
         active = false;
@@ -219,13 +222,8 @@ export function HeroFrameSequence() {
     }
 
     // ─── Eager Decode Burst ───────────────────────────────────────────────────
-    // Immediately kick off the first INITIAL_DECODE_BURST frames so by the
-    // time the user starts scrolling, we already have a full head-start.
-    for (let i = 0; i < Math.min(INITIAL_DECODE_BURST, FRAME_COUNT); i++) {
-      loadFrame(i);
-    }
-    // Also pre-warm the end (footer state) so fast scrollers don't stall
-    for (let i = FRAME_COUNT - 1; i >= FRAME_COUNT - 5; i--) {
+    // Immediately kick-start the preload of ALL frames to warm up the pipeline cache.
+    for (let i = 0; i < FRAME_COUNT; i++) {
       loadFrame(i);
     }
 
@@ -294,16 +292,46 @@ export function HeroFrameSequence() {
       };
     };
 
-    // Give the browser one full animation frame to paint frame 0 before GSAP
-    // injects its scroll listeners (avoids flash on initial load).
-    requestAnimationFrame(() => {
-      if (!active) return;
-      startGsap().catch(() => {
-        // GSAP failed — static first frame is already visible, acceptable fallback.
-      });
-    });
+    // ─── Readiness Gate ───────────────────────────────────────────────────────
+    // We poll until at least 90% of frames are decoded before releasing the lock.
+    const thresholdCount = Math.floor(FRAME_COUNT * 0.9);
+    
+    // Prevent scrolling while loading
+    document.body.style.overflow = "hidden";
 
-    return () => cleanup();
+    const pollInterval = window.setInterval(() => {
+      if (!active) {
+        clearInterval(pollInterval);
+        return;
+      }
+      
+      const numDecoded = decoded.filter(Boolean).length;
+      if (loadingProgressRef.current) {
+        loadingProgressRef.current.style.width = `${(numDecoded / FRAME_COUNT) * 100}%`;
+      }
+
+      if (numDecoded >= thresholdCount) {
+        clearInterval(pollInterval);
+        
+        // Unlock scroll & fade out loader
+        document.body.style.overflow = "";
+        if (loadingContainerRef.current) {
+          loadingContainerRef.current.style.opacity = "0";
+          loadingContainerRef.current.style.pointerEvents = "none";
+        }
+        
+        requestAnimationFrame(() => {
+          if (!active) return;
+          startGsap().catch(() => {});
+        });
+      }
+    }, 100);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.body.style.overflow = "";
+      cleanup();
+    };
   }, []);
 
   return (
@@ -351,6 +379,27 @@ export function HeroFrameSequence() {
       <div className="absolute inset-0 z-20 bg-[radial-gradient(circle_at_top,rgba(164,121,72,0.16),transparent_30%),radial-gradient(circle_at_center,rgba(219,164,88,0.08),transparent_28%),linear-gradient(180deg,rgba(0,0,0,0.48)_0%,rgba(0,0,0,0.22)_42%,rgba(7,7,7,0.78)_100%)]" />
       <div className="pointer-events-none absolute inset-0 z-20 bg-[linear-gradient(90deg,rgba(0,0,0,0.28)_0%,transparent_12%,rgba(188,147,95,0.08)_50%,transparent_88%,rgba(0,0,0,0.24)_100%)]" />
       <div className="pointer-events-none absolute inset-0 z-20 opacity-70 [background-image:linear-gradient(rgba(183,146,98,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(183,146,98,0.06)_1px,transparent_1px)] [background-position:center] [background-size:160px_160px]" />
+
+      {/* Loading Overlay State */}
+      <div
+        ref={loadingContainerRef}
+        className="absolute inset-0 z-25 flex flex-col items-center justify-center bg-black transition-opacity duration-700 ease-in-out will-change-opacity"
+      >
+        <div className="flex w-64 flex-col items-center gap-5">
+          <p className="font-serif text-[1.2rem] uppercase tracking-[0.1em] text-neutral-200 opacity-90 drop-shadow-md">
+            Initializing Sector
+          </p>
+          <div className="h-[1px] w-full overflow-hidden bg-white/10 relative">
+            <div
+              ref={loadingProgressRef}
+              className="absolute left-0 top-0 h-full w-0 bg-gradient-to-r from-[#b79262] via-[#dca971] to-[#b79262] transition-all duration-300 ease-out"
+            />
+          </div>
+          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b79262]/60 animate-pulse">
+            Pre-calculating optics
+          </p>
+        </div>
+      </div>
 
       {/* Intro text */}
       <div
