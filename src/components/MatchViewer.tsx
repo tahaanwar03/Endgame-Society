@@ -55,6 +55,31 @@ export function MatchViewer({ matchId }: { matchId: string }) {
   const fen = useMemo(() => fenAtPly(parsed.moves, ply), [parsed.moves, ply]);
 
   useEffect(() => { setPly(0); }, [pgn]);
+  
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+        return;
+      }
+      
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setPly(v => Math.min(parsed.moves.length, v + 1));
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setPly(v => Math.max(0, v - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setPly(0);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setPly(parsed.moves.length);
+      }
+    }
+    
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [parsed.moves.length]);
 
   if (matchState.loading || gameState.loading || (manualMatch ? players.loading : false)) {
     return (

@@ -20,6 +20,9 @@ type PlayerStats = {
   tournamentsWon: number;
   matchesPlayed?: number;
   winRate?: number;
+  whiteWinRate?: number;
+  blackWinRate?: number;
+  favoriteOpening?: string;
   mostFrequentOpponent?: string;
 };
 
@@ -76,9 +79,27 @@ function PlayerStatsModal({ stats, onClose }: { stats: PlayerStats | null; onClo
           </div>
         </div>
 
-        <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
-          <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Frequent Nemesis</p>
-          <p className="text-sm font-medium text-neutral-200">{stats.mostFrequentOpponent || "None"}</p>
+        {/* Color Performance */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">White WR</p>
+            <p className="text-lg font-bold text-neutral-200 tabular-nums">{stats.whiteWinRate?.toFixed(1) ?? "0.0"}%</p>
+          </div>
+          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Black WR</p>
+            <p className="text-lg font-bold text-[#b0b0b0] tabular-nums">{stats.blackWinRate?.toFixed(1) ?? "0.0"}%</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Opening</p>
+            <p className="text-sm font-medium text-neutral-200">{stats.favoriteOpening !== "Unknown" ? `1. ${stats.favoriteOpening}` : "Unknown"}</p>
+          </div>
+          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Nemesis</p>
+            <p className="text-sm font-medium text-neutral-200 truncate">{stats.mostFrequentOpponent || "None"}</p>
+          </div>
         </div>
       </div>
     </>
@@ -332,25 +353,43 @@ export function Leaderboard() {
       
       let matchesPlayed = 0;
       let matchesWon = 0;
+      let whitePlayed = 0;
+      let whiteWon = 0;
+      let blackPlayed = 0;
+      let blackWon = 0;
       const opponentCounts = new Map<string, number>();
+      const openingCounts = new Map<string, number>();
 
       matches.forEach(m => {
         if (m.player1_id === selectedOtbId || m.player2_id === selectedOtbId) {
           if (m.result !== null) {
             matchesPlayed++;
             
-            if (m.player1_id === selectedOtbId && m.result === "1-0") matchesWon++;
-            else if (m.player2_id === selectedOtbId && m.result === "0-1") matchesWon++;
+            const isWhite = m.player1_id === selectedOtbId;
+            if (isWhite) whitePlayed++; else blackPlayed++;
             
-            const oppId = m.player1_id === selectedOtbId ? m.player2_id : m.player1_id;
+            if (isWhite && m.result === "1-0") { matchesWon++; whiteWon++; }
+            else if (!isWhite && m.result === "0-1") { matchesWon++; blackWon++; }
+            
+            const oppId = isWhite ? m.player2_id : m.player1_id;
             if (oppId) {
               opponentCounts.set(oppId, (opponentCounts.get(oppId) || 0) + 1);
+            }
+            
+            if (isWhite && m.pgn) {
+              const match = m.pgn.match(/1\.\s+([a-zA-Z0-9+#=]+)/);
+              if (match && match[1]) {
+                const op = match[1];
+                openingCounts.set(op, (openingCounts.get(op) || 0) + 1);
+              }
             }
           }
         }
       });
 
       const winRate = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
+      const whiteWinRate = whitePlayed > 0 ? (whiteWon / whitePlayed) * 100 : 0;
+      const blackWinRate = blackPlayed > 0 ? (blackWon / blackPlayed) * 100 : 0;
       
       let mostFrequentOpponentId: string | null = null;
       let maxCount = 0;
@@ -358,6 +397,15 @@ export function Leaderboard() {
         if (count > maxCount) {
           maxCount = count;
           mostFrequentOpponentId = id;
+        }
+      });
+      
+      let favoriteOpening: string | null = null;
+      let maxOpCount = 0;
+      openingCounts.forEach((count, op) => {
+        if (count > maxOpCount) {
+          maxOpCount = count;
+          favoriteOpening = op;
         }
       });
       
@@ -372,6 +420,9 @@ export function Leaderboard() {
         tournamentsWon: entry.gold,
         matchesPlayed,
         winRate,
+        whiteWinRate,
+        blackWinRate,
+        favoriteOpening: favoriteOpening || "Unknown",
         mostFrequentOpponent
       };
     } 
@@ -383,7 +434,12 @@ export function Leaderboard() {
       
       let matchesPlayed = 0;
       let matchesWon = 0;
+      let whitePlayed = 0;
+      let whiteWon = 0;
+      let blackPlayed = 0;
+      let blackWon = 0;
       const opponentCounts = new Map<string, number>();
+      const openingCounts = new Map<string, number>();
       
       const targetUser = selectedOnlineId.toLowerCase();
 
@@ -394,17 +450,30 @@ export function Leaderboard() {
         if (white === targetUser || black === targetUser) {
           matchesPlayed++;
           
-          if (white === targetUser && g.result === "1-0") matchesWon++;
-          else if (black === targetUser && g.result === "0-1") matchesWon++;
+          const isWhite = white === targetUser;
+          if (isWhite) whitePlayed++; else blackPlayed++;
           
-          const oppName = white === targetUser ? g.black : g.white;
+          if (isWhite && g.result === "1-0") { matchesWon++; whiteWon++; }
+          else if (!isWhite && g.result === "0-1") { matchesWon++; blackWon++; }
+          
+          const oppName = isWhite ? g.black : g.white;
           if (oppName) {
             opponentCounts.set(oppName, (opponentCounts.get(oppName) || 0) + 1);
+          }
+          
+          if (isWhite && g.movesPgn) {
+            const match = g.movesPgn.match(/1\.\s+([a-zA-Z0-9+#=]+)/);
+            if (match && match[1]) {
+              const op = match[1];
+              openingCounts.set(op, (openingCounts.get(op) || 0) + 1);
+            }
           }
         }
       });
 
       const winRate = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
+      const whiteWinRate = whitePlayed > 0 ? (whiteWon / whitePlayed) * 100 : 0;
+      const blackWinRate = blackPlayed > 0 ? (blackWon / blackPlayed) * 100 : 0;
       
       let mostFrequentOpponent: string | null = null;
       let maxCount = 0;
@@ -412,6 +481,15 @@ export function Leaderboard() {
         if (count > maxCount) {
           maxCount = count;
           mostFrequentOpponent = name;
+        }
+      });
+      
+      let favoriteOpening: string | null = null;
+      let maxOpCount = 0;
+      openingCounts.forEach((count, op) => {
+        if (count > maxOpCount) {
+          maxOpCount = count;
+          favoriteOpening = op;
         }
       });
 
@@ -422,6 +500,9 @@ export function Leaderboard() {
         tournamentsWon: entry.gold,
         matchesPlayed,
         winRate,
+        whiteWinRate,
+        blackWinRate,
+        favoriteOpening: favoriteOpening || "Unknown",
         mostFrequentOpponent: mostFrequentOpponent || "None"
       };
     }
