@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
-import { useTournaments, useMatches, usePlayers } from "@/lib/firestore-hooks";
+import { useTournaments, useMatches, usePlayers, useGames } from "@/lib/firestore-hooks";
 import { computeStandings } from "@/lib/standings";
 import type { Player, Match } from "@/lib/types";
 
@@ -25,7 +25,6 @@ type PlayerStats = {
 
 function PlayerStatsModal({ stats, onClose }: { stats: PlayerStats | null; onClose: () => void }) {
   if (!stats) return null;
-  const isOnline = stats.matchesPlayed === undefined;
 
   return (
     <>
@@ -49,47 +48,38 @@ function PlayerStatsModal({ stats, onClose }: { stats: PlayerStats | null; onClo
           </div>
         </div>
 
-        {!isOnline ? (
-          <>
-            <div className="mb-6 flex items-center justify-between border border-white/[0.05] bg-[#0f0f0f] px-5 py-4">
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Win Rate</p>
-                <div className="flex items-baseline gap-2">
-                  <p className="text-2xl font-bold text-neutral-200 tabular-nums">{stats.winRate?.toFixed(1) ?? "0.0"}%</p>
-                  <p className="text-[10px] text-neutral-600 uppercase tracking-widest">{stats.matchesPlayed} games</p>
-                </div>
-              </div>
-              
-              {/* Simple SVG Pie Chart */}
-              <div className="relative h-14 w-14 rounded-full bg-[#1a1a1a]">
-                <svg viewBox="0 0 32 32" className="h-full w-full -rotate-90 rounded-full">
-                  <circle r="16" cx="16" cy="16" fill="#1a1a1a" />
-                  <circle
-                    r="16"
-                    cx="16"
-                    cy="16"
-                    fill="transparent"
-                    stroke="#b79262"
-                    strokeWidth="32"
-                    strokeDasharray={`${(stats.winRate ?? 0) * 1.0053} 100`}
-                  />
-                </svg>
-                {/* Inner cutout for donut chart look */}
-                <div className="absolute inset-2 rounded-full bg-[#0f0f0f]" />
-              </div>
+        <div className="mb-6 flex items-center justify-between border border-white/[0.05] bg-[#0f0f0f] px-5 py-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Win Rate</p>
+            <div className="flex items-baseline gap-2">
+              <p className="text-2xl font-bold text-neutral-200 tabular-nums">{stats.winRate?.toFixed(1) ?? "0.0"}%</p>
+              <p className="text-[10px] text-neutral-600 uppercase tracking-widest">{stats.matchesPlayed ?? 0} games</p>
             </div>
-
-            <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
-              <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Frequent Nemesis</p>
-              <p className="text-sm font-medium text-neutral-200">{stats.mostFrequentOpponent || "None"}</p>
-            </div>
-          </>
-        ) : (
-          <div className="border border-white/[0.05] bg-[#141414] p-4 text-center">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500">Detailed combat logs unavailable</p>
-            <p className="text-xs text-neutral-600 mt-1">Lichess synschronization only records final placement.</p>
           </div>
-        )}
+          
+          {/* Simple SVG Pie Chart */}
+          <div className="relative h-14 w-14 rounded-full bg-[#1a1a1a]">
+            <svg viewBox="0 0 32 32" className="h-full w-full -rotate-90 rounded-full">
+              <circle r="16" cx="16" cy="16" fill="#1a1a1a" />
+              <circle
+                r="16"
+                cx="16"
+                cy="16"
+                fill="transparent"
+                stroke="#b79262"
+                strokeWidth="32"
+                strokeDasharray={`${(stats.winRate ?? 0) * 1.0053} 100`}
+              />
+            </svg>
+            {/* Inner cutout for donut chart look */}
+            <div className="absolute inset-2 rounded-full bg-[#0f0f0f]" />
+          </div>
+        </div>
+
+        <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
+          <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Frequent Nemesis</p>
+          <p className="text-sm font-medium text-neutral-200">{stats.mostFrequentOpponent || "None"}</p>
+        </div>
       </div>
     </>
   );
@@ -266,9 +256,10 @@ export function Leaderboard() {
   const { data: tournaments, loading: tl, error: te } = useTournaments();
   const { data: players, loading: pl, error: pe } = usePlayers();
   const { data: matches, loading: ml, error: me } = useMatches();
+  const { data: games, loading: gl, error: ge } = useGames();
 
-  const loading = tl || pl || ml;
-  const error = te || pe || me;
+  const loading = tl || pl || ml || gl;
+  const error = te || pe || me || ge;
 
   const otbEntries = useMemo<OtbEntry[]>(() => {
     const eligible = tournaments.filter(
@@ -390,16 +381,53 @@ export function Leaderboard() {
       if (!entry) return null;
       const rank = denseRanks(onlineEntries)[onlineEntries.indexOf(entry)];
       
+      let matchesPlayed = 0;
+      let matchesWon = 0;
+      const opponentCounts = new Map<string, number>();
+      
+      const targetUser = selectedOnlineId.toLowerCase();
+
+      games.forEach(g => {
+        const white = g.white.toLowerCase();
+        const black = g.black.toLowerCase();
+        
+        if (white === targetUser || black === targetUser) {
+          matchesPlayed++;
+          
+          if (white === targetUser && g.result === "1-0") matchesWon++;
+          else if (black === targetUser && g.result === "0-1") matchesWon++;
+          
+          const oppName = white === targetUser ? g.black : g.white;
+          if (oppName) {
+            opponentCounts.set(oppName, (opponentCounts.get(oppName) || 0) + 1);
+          }
+        }
+      });
+
+      const winRate = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
+      
+      let mostFrequentOpponent: string | null = null;
+      let maxCount = 0;
+      opponentCounts.forEach((count, name) => {
+        if (count > maxCount) {
+          maxCount = count;
+          mostFrequentOpponent = name;
+        }
+      });
+
       return {
         name: entry.username,
         rank,
         tournamentsPlayed: entry.played,
-        tournamentsWon: entry.gold
+        tournamentsWon: entry.gold,
+        matchesPlayed,
+        winRate,
+        mostFrequentOpponent: mostFrequentOpponent || "None"
       };
     }
 
     return null;
-  }, [selectedOtbId, selectedOnlineId, otbEntries, onlineEntries, matches, players]);
+  }, [selectedOtbId, selectedOnlineId, otbEntries, onlineEntries, matches, players, games]);
 
   if (loading) return <LoadingState label="Computing leaderboard" />;
   if (error) return <EmptyState title="Leaderboard unavailable" detail={error} />;
