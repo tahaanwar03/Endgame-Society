@@ -71,6 +71,8 @@ export async function GET(request: NextRequest) {
   }
 }
 
+import { runLichessSync } from "@/server/sync/lichessSync";
+
 export async function PUT(request: NextRequest) {
   try {
     const user = await verifyAdminToken(request);
@@ -99,8 +101,21 @@ export async function PUT(request: NextRequest) {
       { tournamentIds: safeTournamentIds, creatorUsernames: safeCreatorUsernames },
       { merge: true }
     );
+    
+    // Trigger an immediate sync pull after updating the registry
+    let syncResult = null;
+    try {
+      syncResult = await runLichessSync();
+    } catch (syncError) {
+      console.error("Immediate sync after registry update failed:", syncError);
+    }
 
-    return NextResponse.json({ ok: true, tournamentIds: safeTournamentIds, creatorUsernames: safeCreatorUsernames });
+    return NextResponse.json({ 
+      ok: true, 
+      tournamentIds: safeTournamentIds, 
+      creatorUsernames: safeCreatorUsernames,
+      syncResult
+    });
   } catch (error) {
     console.error("Registry PUT failed:", error);
     return NextResponse.json(
