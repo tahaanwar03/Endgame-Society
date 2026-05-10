@@ -4,13 +4,95 @@ import { useMemo, useState } from "react";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
 import { useTournaments, useMatches, usePlayers } from "@/lib/firestore-hooks";
 import { computeStandings } from "@/lib/standings";
-import type { Player } from "@/lib/types";
+import type { Player, Match } from "@/lib/types";
 
 function leaderboardPoints(rank: number) {
   if (rank === 1) return 10;
   if (rank === 2) return 5;
   if (rank === 3) return 3;
   return 1;
+}
+
+type PlayerStats = {
+  name: string;
+  rank: number;
+  tournamentsPlayed: number;
+  tournamentsWon: number;
+  matchesPlayed?: number;
+  winRate?: number;
+  mostFrequentOpponent?: string;
+};
+
+function PlayerStatsModal({ stats, onClose }: { stats: PlayerStats | null; onClose: () => void }) {
+  if (!stats) return null;
+  const isOnline = stats.matchesPlayed === undefined;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 border border-[#2a2218] bg-[#0a0a0a] p-6 shadow-2xl">
+        <button onClick={onClose} className="absolute right-4 top-4 text-neutral-500 hover:text-white">✕</button>
+        
+        <h3 className="font-serif text-2xl text-gold-gradient mb-1">{stats.name}</h3>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#b79262] mb-6">
+          Global Rank: #{stats.rank}
+        </p>
+
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Events</p>
+            <p className="text-xl font-bold text-neutral-200 tabular-nums">{stats.tournamentsPlayed}</p>
+          </div>
+          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Victories</p>
+            <p className="text-xl font-bold text-[#f2ca50] tabular-nums">{stats.tournamentsWon}</p>
+          </div>
+        </div>
+
+        {!isOnline ? (
+          <>
+            <div className="mb-6 flex items-center justify-between border border-white/[0.05] bg-[#0f0f0f] px-5 py-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Win Rate</p>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-2xl font-bold text-neutral-200 tabular-nums">{stats.winRate?.toFixed(1) ?? "0.0"}%</p>
+                  <p className="text-[10px] text-neutral-600 uppercase tracking-widest">{stats.matchesPlayed} games</p>
+                </div>
+              </div>
+              
+              {/* Simple SVG Pie Chart */}
+              <div className="relative h-14 w-14 rounded-full bg-[#1a1a1a]">
+                <svg viewBox="0 0 32 32" className="h-full w-full -rotate-90 rounded-full">
+                  <circle r="16" cx="16" cy="16" fill="#1a1a1a" />
+                  <circle
+                    r="16"
+                    cx="16"
+                    cy="16"
+                    fill="transparent"
+                    stroke="#b79262"
+                    strokeWidth="32"
+                    strokeDasharray={`${(stats.winRate ?? 0) * 1.0053} 100`}
+                  />
+                </svg>
+                {/* Inner cutout for donut chart look */}
+                <div className="absolute inset-2 rounded-full bg-[#0f0f0f]" />
+              </div>
+            </div>
+
+            <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
+              <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Frequent Nemesis</p>
+              <p className="text-sm font-medium text-neutral-200">{stats.mostFrequentOpponent || "None"}</p>
+            </div>
+          </>
+        ) : (
+          <div className="border border-white/[0.05] bg-[#141414] p-4 text-center">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500">Detailed combat logs unavailable</p>
+            <p className="text-xs text-neutral-600 mt-1">Lichess synschronization only records final placement.</p>
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 type OtbEntry = {
@@ -105,7 +187,7 @@ function MedalCell({ count, cls }: { count: number; cls: string }) {
   );
 }
 
-function OtbTable({ entries }: { entries: OtbEntry[] }) {
+function OtbTable({ entries, onRowClick }: { entries: OtbEntry[]; onRowClick: (id: string) => void }) {
   const ranks = denseRanks(entries);
   if (!entries.length)
     return <EmptyState title="No results yet" detail="Leaderboard populates as over-the-board tournaments complete." />;
@@ -117,7 +199,7 @@ function OtbTable({ entries }: { entries: OtbEntry[] }) {
           const rank = ranks[i];
           const top3 = rank <= 3;
           return (
-            <tr key={entry.player.id} className={`border-b border-white/[0.04] transition-colors duration-150 hover:bg-white/[0.02] ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
+            <tr key={entry.player.id} onClick={() => onRowClick(entry.player.id)} className={`cursor-pointer border-b border-white/[0.04] transition-colors duration-150 hover:bg-[#b79262]/20 ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
               <RankCell rank={rank} />
               <td className="px-4 py-3">
                 <span className={`font-medium ${top3 ? "text-neutral-100" : "text-neutral-300"}`}>{entry.player.name}</span>
@@ -141,7 +223,7 @@ function OtbTable({ entries }: { entries: OtbEntry[] }) {
   );
 }
 
-function OnlineTable({ entries }: { entries: OnlineEntry[] }) {
+function OnlineTable({ entries, onRowClick }: { entries: OnlineEntry[]; onRowClick: (username: string) => void }) {
   const ranks = denseRanks(entries);
   if (!entries.length)
     return <EmptyState title="No results yet" detail="Leaderboard populates as online tournaments finish." />;
@@ -153,7 +235,7 @@ function OnlineTable({ entries }: { entries: OnlineEntry[] }) {
           const rank = ranks[i];
           const top3 = rank <= 3;
           return (
-            <tr key={entry.username} className={`border-b border-white/[0.04] transition-colors duration-150 hover:bg-white/[0.02] ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
+            <tr key={entry.username} onClick={() => onRowClick(entry.username)} className={`cursor-pointer border-b border-white/[0.04] transition-colors duration-150 hover:bg-[#b79262]/20 ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
               <RankCell rank={rank} />
               <td className="px-4 py-3">
                 <span className={`font-medium ${top3 ? "text-neutral-100" : "text-neutral-300"}`}>{entry.username}</span>
@@ -178,6 +260,8 @@ function OnlineTable({ entries }: { entries: OnlineEntry[] }) {
 
 export function Leaderboard() {
   const [tab, setTab] = useState<"otb" | "online">("otb");
+  const [selectedOtbId, setSelectedOtbId] = useState<string | null>(null);
+  const [selectedOnlineId, setSelectedOnlineId] = useState<string | null>(null);
 
   const { data: tournaments, loading: tl, error: te } = useTournaments();
   const { data: players, loading: pl, error: pe } = usePlayers();
@@ -248,6 +332,75 @@ export function Leaderboard() {
       .sort((a, b) => b.points - a.points || b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || a.username.localeCompare(b.username));
   }, [tournaments]);
 
+  const selectedStats = useMemo<PlayerStats | null>(() => {
+    if (selectedOtbId) {
+      const entry = otbEntries.find(e => e.player.id === selectedOtbId);
+      if (!entry) return null;
+      
+      const rank = denseRanks(otbEntries)[otbEntries.indexOf(entry)];
+      
+      let matchesPlayed = 0;
+      let matchesWon = 0;
+      const opponentCounts = new Map<string, number>();
+
+      matches.forEach(m => {
+        if (m.player1_id === selectedOtbId || m.player2_id === selectedOtbId) {
+          if (m.result !== null) {
+            matchesPlayed++;
+            
+            if (m.player1_id === selectedOtbId && m.result === "1-0") matchesWon++;
+            else if (m.player2_id === selectedOtbId && m.result === "0-1") matchesWon++;
+            
+            const oppId = m.player1_id === selectedOtbId ? m.player2_id : m.player1_id;
+            if (oppId) {
+              opponentCounts.set(oppId, (opponentCounts.get(oppId) || 0) + 1);
+            }
+          }
+        }
+      });
+
+      const winRate = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
+      
+      let mostFrequentOpponentId: string | null = null;
+      let maxCount = 0;
+      opponentCounts.forEach((count, id) => {
+        if (count > maxCount) {
+          maxCount = count;
+          mostFrequentOpponentId = id;
+        }
+      });
+      
+      const mostFrequentOpponent = mostFrequentOpponentId 
+        ? players.find(p => p.id === mostFrequentOpponentId)?.name 
+        : "None";
+
+      return {
+        name: entry.player.name,
+        rank,
+        tournamentsPlayed: entry.played,
+        tournamentsWon: entry.gold,
+        matchesPlayed,
+        winRate,
+        mostFrequentOpponent
+      };
+    } 
+    
+    if (selectedOnlineId) {
+      const entry = onlineEntries.find(e => e.username === selectedOnlineId);
+      if (!entry) return null;
+      const rank = denseRanks(onlineEntries)[onlineEntries.indexOf(entry)];
+      
+      return {
+        name: entry.username,
+        rank,
+        tournamentsPlayed: entry.played,
+        tournamentsWon: entry.gold
+      };
+    }
+
+    return null;
+  }, [selectedOtbId, selectedOnlineId, otbEntries, onlineEntries, matches, players]);
+
   if (loading) return <LoadingState label="Computing leaderboard" />;
   if (error) return <EmptyState title="Leaderboard unavailable" detail={error} />;
 
@@ -282,8 +435,10 @@ export function Leaderboard() {
       <PointsKey />
 
       {tab === "otb"
-        ? <OtbTable entries={otbEntries} />
-        : <OnlineTable entries={onlineEntries} />}
+        ? <OtbTable entries={otbEntries} onRowClick={setSelectedOtbId} />
+        : <OnlineTable entries={onlineEntries} onRowClick={setSelectedOnlineId} />}
+
+      <PlayerStatsModal stats={selectedStats} onClose={() => { setSelectedOtbId(null); setSelectedOnlineId(null); }} />
     </section>
   );
 }
