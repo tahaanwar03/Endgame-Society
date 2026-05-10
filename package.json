@@ -9,6 +9,7 @@
     "lint": "node node_modules/next/dist/bin/next lint"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "chess.js": "^1.4.0",
     "firebase": "10.14.1",
     "firebase-admin": "^13.8.0",
