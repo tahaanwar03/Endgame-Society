@@ -2,108 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { EmptyState, LoadingState } from "@/components/LoadingState";
-import { useTournaments, useMatches, usePlayers, useGames } from "@/lib/firestore-hooks";
+import { useTournaments, useMatches, usePlayers } from "@/lib/firestore-hooks";
 import { computeStandings } from "@/lib/standings";
-import type { Player, Match } from "@/lib/types";
+import type { Player } from "@/lib/types";
 
 function leaderboardPoints(rank: number) {
   if (rank === 1) return 10;
   if (rank === 2) return 5;
   if (rank === 3) return 3;
   return 1;
-}
-
-type PlayerStats = {
-  name: string;
-  rank: number;
-  tournamentsPlayed: number;
-  tournamentsWon: number;
-  matchesPlayed?: number;
-  winRate?: number;
-  whiteWinRate?: number;
-  blackWinRate?: number;
-  favoriteOpening?: string;
-  mostFrequentOpponent?: string;
-};
-
-function PlayerStatsModal({ stats, onClose }: { stats: PlayerStats | null; onClose: () => void }) {
-  if (!stats) return null;
-
-  return (
-    <>
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 border border-[#2a2218] bg-[#0a0a0a] p-6 shadow-2xl">
-        <button onClick={onClose} className="absolute right-4 top-4 text-neutral-500 hover:text-white">✕</button>
-        
-        <h3 className="font-serif text-2xl text-gold-gradient mb-1">{stats.name}</h3>
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#b79262] mb-6">
-          Global Rank: #{stats.rank}
-        </p>
-
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Events</p>
-            <p className="text-xl font-bold text-neutral-200 tabular-nums">{stats.tournamentsPlayed}</p>
-          </div>
-          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Victories</p>
-            <p className="text-xl font-bold text-[#f2ca50] tabular-nums">{stats.tournamentsWon}</p>
-          </div>
-        </div>
-
-        <div className="mb-6 flex items-center justify-between border border-white/[0.05] bg-[#0f0f0f] px-5 py-4">
-          <div>
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Win Rate</p>
-            <div className="flex items-baseline gap-2">
-              <p className="text-2xl font-bold text-neutral-200 tabular-nums">{stats.winRate?.toFixed(1) ?? "0.0"}%</p>
-              <p className="text-[10px] text-neutral-600 uppercase tracking-widest">{stats.matchesPlayed ?? 0} games</p>
-            </div>
-          </div>
-          
-          {/* Simple SVG Pie Chart */}
-          <div className="relative h-14 w-14 rounded-full bg-[#1a1a1a]">
-            <svg viewBox="0 0 32 32" className="h-full w-full -rotate-90 rounded-full">
-              <circle r="16" cx="16" cy="16" fill="#1a1a1a" />
-              <circle
-                r="16"
-                cx="16"
-                cy="16"
-                fill="transparent"
-                stroke="#b79262"
-                strokeWidth="32"
-                strokeDasharray={`${(stats.winRate ?? 0) * 1.0053} 100`}
-              />
-            </svg>
-            {/* Inner cutout for donut chart look */}
-            <div className="absolute inset-2 rounded-full bg-[#0f0f0f]" />
-          </div>
-        </div>
-
-        {/* Color Performance */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">White WR</p>
-            <p className="text-lg font-bold text-neutral-200 tabular-nums">{stats.whiteWinRate?.toFixed(1) ?? "0.0"}%</p>
-          </div>
-          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4 text-center">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Black WR</p>
-            <p className="text-lg font-bold text-[#b0b0b0] tabular-nums">{stats.blackWinRate?.toFixed(1) ?? "0.0"}%</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Opening</p>
-            <p className="text-sm font-medium text-neutral-200">{stats.favoriteOpening !== "Unknown" ? `1. ${stats.favoriteOpening}` : "Unknown"}</p>
-          </div>
-          <div className="border border-white/[0.05] bg-[#0f0f0f] p-4">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Nemesis</p>
-            <p className="text-sm font-medium text-neutral-200 truncate">{stats.mostFrequentOpponent || "None"}</p>
-          </div>
-        </div>
-      </div>
-    </>
-  );
 }
 
 type OtbEntry = {
@@ -137,9 +44,9 @@ function PointsKey() {
     <div className="mb-8 flex flex-wrap gap-2">
       {[
         { label: "1st place", pts: "10 pts", cls: "text-[#f2ca50]" },
-        { label: "2nd place", pts: "5 pts",  cls: "text-[#b0b0b0]" },
-        { label: "3rd place", pts: "3 pts",  cls: "text-[#cd7f32]" },
-        { label: "4th+",      pts: "1 pt",   cls: "text-neutral-500" },
+        { label: "2nd place", pts: "5 pts", cls: "text-[#b0b0b0]" },
+        { label: "3rd place", pts: "3 pts", cls: "text-[#cd7f32]" },
+        { label: "4th+", pts: "1 pt", cls: "text-neutral-500" },
       ].map(({ label, pts, cls }) => (
         <div key={label} className="flex items-center gap-2 border border-white/[0.06] bg-[#0f0f0f] px-3 py-2">
           <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-600">{label}</span>
@@ -176,12 +83,11 @@ function TableShell({ children }: { children: React.ReactNode }) {
 function RankCell({ rank }: { rank: number }) {
   return (
     <td className="w-10 px-4 py-3">
-      <span className={`tabular-nums font-bold ${
-        rank === 1 ? "text-[#f2ca50]"
-        : rank === 2 ? "text-[#b0b0b0]"
-        : rank === 3 ? "text-[#cd7f32]"
-        : "text-neutral-600"
-      }`}>
+      <span className={`tabular-nums font-bold ${rank === 1 ? "text-[#f2ca50]"
+          : rank === 2 ? "text-[#b0b0b0]"
+            : rank === 3 ? "text-[#cd7f32]"
+              : "text-neutral-600"
+        }`}>
         {rank}
       </span>
     </td>
@@ -198,7 +104,7 @@ function MedalCell({ count, cls }: { count: number; cls: string }) {
   );
 }
 
-function OtbTable({ entries, onRowClick }: { entries: OtbEntry[]; onRowClick: (id: string) => void }) {
+function OtbTable({ entries }: { entries: OtbEntry[] }) {
   const ranks = denseRanks(entries);
   if (!entries.length)
     return <EmptyState title="No results yet" detail="Leaderboard populates as over-the-board tournaments complete." />;
@@ -210,7 +116,7 @@ function OtbTable({ entries, onRowClick }: { entries: OtbEntry[]; onRowClick: (i
           const rank = ranks[i];
           const top3 = rank <= 3;
           return (
-            <tr key={entry.player.id} onClick={() => onRowClick(entry.player.id)} className={`cursor-pointer border-b border-white/[0.04] transition-colors duration-150 hover:bg-[#b79262]/20 ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
+            <tr key={entry.player.id} className={`border-b border-white/[0.04] transition-colors duration-150 hover:bg-white/[0.02] ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
               <RankCell rank={rank} />
               <td className="px-4 py-3">
                 <span className={`font-medium ${top3 ? "text-neutral-100" : "text-neutral-300"}`}>{entry.player.name}</span>
@@ -219,7 +125,7 @@ function OtbTable({ entries, onRowClick }: { entries: OtbEntry[]; onRowClick: (i
               <td className="px-4 py-3 text-right">
                 <span className={`tabular-nums font-bold ${top3 ? "text-[#f2ca50]" : "text-neutral-400"}`}>{entry.points}</span>
               </td>
-              <MedalCell count={entry.gold}   cls="text-[#f2ca50]" />
+              <MedalCell count={entry.gold} cls="text-[#f2ca50]" />
               <MedalCell count={entry.silver} cls="text-[#b0b0b0]" />
               <MedalCell count={entry.bronze} cls="text-[#cd7f32]" />
               <td className="px-4 py-3 text-right tabular-nums text-neutral-600">{entry.played}</td>
@@ -234,7 +140,7 @@ function OtbTable({ entries, onRowClick }: { entries: OtbEntry[]; onRowClick: (i
   );
 }
 
-function OnlineTable({ entries, onRowClick }: { entries: OnlineEntry[]; onRowClick: (username: string) => void }) {
+function OnlineTable({ entries }: { entries: OnlineEntry[] }) {
   const ranks = denseRanks(entries);
   if (!entries.length)
     return <EmptyState title="No results yet" detail="Leaderboard populates as online tournaments finish." />;
@@ -246,7 +152,7 @@ function OnlineTable({ entries, onRowClick }: { entries: OnlineEntry[]; onRowCli
           const rank = ranks[i];
           const top3 = rank <= 3;
           return (
-            <tr key={entry.username} onClick={() => onRowClick(entry.username)} className={`cursor-pointer border-b border-white/[0.04] transition-colors duration-150 hover:bg-[#b79262]/20 ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
+            <tr key={entry.username} className={`border-b border-white/[0.04] transition-colors duration-150 hover:bg-white/[0.02] ${i % 2 === 1 ? "bg-white/[0.01]" : ""}`}>
               <RankCell rank={rank} />
               <td className="px-4 py-3">
                 <span className={`font-medium ${top3 ? "text-neutral-100" : "text-neutral-300"}`}>{entry.username}</span>
@@ -254,7 +160,7 @@ function OnlineTable({ entries, onRowClick }: { entries: OnlineEntry[]; onRowCli
               <td className="px-4 py-3 text-right">
                 <span className={`tabular-nums font-bold ${top3 ? "text-[#f2ca50]" : "text-neutral-400"}`}>{entry.points}</span>
               </td>
-              <MedalCell count={entry.gold}   cls="text-[#f2ca50]" />
+              <MedalCell count={entry.gold} cls="text-[#f2ca50]" />
               <MedalCell count={entry.silver} cls="text-[#b0b0b0]" />
               <MedalCell count={entry.bronze} cls="text-[#cd7f32]" />
               <td className="px-4 py-3 text-right tabular-nums text-neutral-600">{entry.played}</td>
@@ -271,16 +177,13 @@ function OnlineTable({ entries, onRowClick }: { entries: OnlineEntry[]; onRowCli
 
 export function Leaderboard() {
   const [tab, setTab] = useState<"otb" | "online">("otb");
-  const [selectedOtbId, setSelectedOtbId] = useState<string | null>(null);
-  const [selectedOnlineId, setSelectedOnlineId] = useState<string | null>(null);
 
   const { data: tournaments, loading: tl, error: te } = useTournaments();
   const { data: players, loading: pl, error: pe } = usePlayers();
   const { data: matches, loading: ml, error: me } = useMatches();
-  const { data: games, loading: gl, error: ge } = useGames();
 
-  const loading = tl || pl || ml || gl;
-  const error = te || pe || me || ge;
+  const loading = tl || pl || ml;
+  const error = te || pe || me;
 
   const otbEntries = useMemo<OtbEntry[]>(() => {
     const eligible = tournaments.filter(
@@ -344,172 +247,6 @@ export function Leaderboard() {
       .sort((a, b) => b.points - a.points || b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || a.username.localeCompare(b.username));
   }, [tournaments]);
 
-  const selectedStats = useMemo<PlayerStats | null>(() => {
-    if (selectedOtbId) {
-      const entry = otbEntries.find(e => e.player.id === selectedOtbId);
-      if (!entry) return null;
-      
-      const rank = denseRanks(otbEntries)[otbEntries.indexOf(entry)];
-      
-      let matchesPlayed = 0;
-      let matchesWon = 0;
-      let whitePlayed = 0;
-      let whiteWon = 0;
-      let blackPlayed = 0;
-      let blackWon = 0;
-      const opponentCounts = new Map<string, number>();
-      const openingCounts = new Map<string, number>();
-
-      matches.forEach(m => {
-        if (m.player1_id === selectedOtbId || m.player2_id === selectedOtbId) {
-          if (m.result !== null) {
-            matchesPlayed++;
-            
-            const isWhite = m.player1_id === selectedOtbId;
-            if (isWhite) whitePlayed++; else blackPlayed++;
-            
-            if (isWhite && m.result === "1-0") { matchesWon++; whiteWon++; }
-            else if (!isWhite && m.result === "0-1") { matchesWon++; blackWon++; }
-            
-            const oppId = isWhite ? m.player2_id : m.player1_id;
-            if (oppId) {
-              opponentCounts.set(oppId, (opponentCounts.get(oppId) || 0) + 1);
-            }
-            
-            if (isWhite && m.pgn) {
-              const match = m.pgn.match(/1\.\s+([a-zA-Z0-9+#=]+)/);
-              if (match && match[1]) {
-                const op = match[1];
-                openingCounts.set(op, (openingCounts.get(op) || 0) + 1);
-              }
-            }
-          }
-        }
-      });
-
-      const winRate = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
-      const whiteWinRate = whitePlayed > 0 ? (whiteWon / whitePlayed) * 100 : 0;
-      const blackWinRate = blackPlayed > 0 ? (blackWon / blackPlayed) * 100 : 0;
-      
-      let mostFrequentOpponentId: string | null = null;
-      let maxCount = 0;
-      opponentCounts.forEach((count, id) => {
-        if (count > maxCount) {
-          maxCount = count;
-          mostFrequentOpponentId = id;
-        }
-      });
-      
-      let favoriteOpening: string | null = null;
-      let maxOpCount = 0;
-      openingCounts.forEach((count, op) => {
-        if (count > maxOpCount) {
-          maxOpCount = count;
-          favoriteOpening = op;
-        }
-      });
-      
-      const mostFrequentOpponent = mostFrequentOpponentId 
-        ? players.find(p => p.id === mostFrequentOpponentId)?.name 
-        : "None";
-
-      return {
-        name: entry.player.name,
-        rank,
-        tournamentsPlayed: entry.played,
-        tournamentsWon: entry.gold,
-        matchesPlayed,
-        winRate,
-        whiteWinRate,
-        blackWinRate,
-        favoriteOpening: favoriteOpening || "Unknown",
-        mostFrequentOpponent
-      };
-    } 
-    
-    if (selectedOnlineId) {
-      const entry = onlineEntries.find(e => e.username === selectedOnlineId);
-      if (!entry) return null;
-      const rank = denseRanks(onlineEntries)[onlineEntries.indexOf(entry)];
-      
-      let matchesPlayed = 0;
-      let matchesWon = 0;
-      let whitePlayed = 0;
-      let whiteWon = 0;
-      let blackPlayed = 0;
-      let blackWon = 0;
-      const opponentCounts = new Map<string, number>();
-      const openingCounts = new Map<string, number>();
-      
-      const targetUser = selectedOnlineId.toLowerCase();
-
-      games.forEach(g => {
-        const white = g.white.toLowerCase();
-        const black = g.black.toLowerCase();
-        
-        if (white === targetUser || black === targetUser) {
-          matchesPlayed++;
-          
-          const isWhite = white === targetUser;
-          if (isWhite) whitePlayed++; else blackPlayed++;
-          
-          if (isWhite && g.result === "1-0") { matchesWon++; whiteWon++; }
-          else if (!isWhite && g.result === "0-1") { matchesWon++; blackWon++; }
-          
-          const oppName = isWhite ? g.black : g.white;
-          if (oppName) {
-            opponentCounts.set(oppName, (opponentCounts.get(oppName) || 0) + 1);
-          }
-          
-          if (isWhite && g.movesPgn) {
-            const match = g.movesPgn.match(/1\.\s+([a-zA-Z0-9+#=]+)/);
-            if (match && match[1]) {
-              const op = match[1];
-              openingCounts.set(op, (openingCounts.get(op) || 0) + 1);
-            }
-          }
-        }
-      });
-
-      const winRate = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
-      const whiteWinRate = whitePlayed > 0 ? (whiteWon / whitePlayed) * 100 : 0;
-      const blackWinRate = blackPlayed > 0 ? (blackWon / blackPlayed) * 100 : 0;
-      
-      let mostFrequentOpponent: string | null = null;
-      let maxCount = 0;
-      opponentCounts.forEach((count, name) => {
-        if (count > maxCount) {
-          maxCount = count;
-          mostFrequentOpponent = name;
-        }
-      });
-      
-      let favoriteOpening: string | null = null;
-      let maxOpCount = 0;
-      openingCounts.forEach((count, op) => {
-        if (count > maxOpCount) {
-          maxOpCount = count;
-          favoriteOpening = op;
-        }
-      });
-
-      return {
-        name: entry.username,
-        rank,
-        tournamentsPlayed: entry.played,
-        tournamentsWon: entry.gold,
-        matchesPlayed,
-        winRate,
-        whiteWinRate,
-        blackWinRate,
-        favoriteOpening: favoriteOpening || "Unknown",
-        mostFrequentOpponent: mostFrequentOpponent || "None"
-      };
-    }
-
-    return null;
-  }, [selectedOtbId, selectedOnlineId, otbEntries, onlineEntries, matches, players, games]);
-
   if (loading) return <LoadingState label="Computing leaderboard" />;
   if (error) return <EmptyState title="Leaderboard unavailable" detail={error} />;
 
@@ -520,22 +257,20 @@ export function Leaderboard() {
         <button
           type="button"
           onClick={() => setTab("otb")}
-          className={`flex-1 min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 border first:border-r-0 ${
-            tab === "otb"
+          className={`flex-1 min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 border first:border-r-0 ${tab === "otb"
               ? "border-[#b79262] bg-[#b79262]/10 text-[#f2ca50]"
               : "border-white/[0.08] text-neutral-500 hover:border-[#b79262]/40 hover:text-neutral-300"
-          }`}
+            }`}
         >
           Over the Board
         </button>
         <button
           type="button"
           onClick={() => setTab("online")}
-          className={`flex-1 min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 border ${
-            tab === "online"
+          className={`flex-1 min-h-10 px-5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-200 border ${tab === "online"
               ? "border-[#b79262] bg-[#b79262]/10 text-[#f2ca50]"
               : "border-white/[0.08] text-neutral-500 hover:border-[#b79262]/40 hover:text-neutral-300"
-          }`}
+            }`}
         >
           Online
         </button>
@@ -544,10 +279,8 @@ export function Leaderboard() {
       <PointsKey />
 
       {tab === "otb"
-        ? <OtbTable entries={otbEntries} onRowClick={setSelectedOtbId} />
-        : <OnlineTable entries={onlineEntries} onRowClick={setSelectedOnlineId} />}
-
-      <PlayerStatsModal stats={selectedStats} onClose={() => { setSelectedOtbId(null); setSelectedOnlineId(null); }} />
+        ? <OtbTable entries={otbEntries} />
+        : <OnlineTable entries={onlineEntries} />}
     </section>
   );
 }

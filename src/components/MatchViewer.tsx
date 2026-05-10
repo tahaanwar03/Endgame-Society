@@ -55,31 +55,6 @@ export function MatchViewer({ matchId }: { matchId: string }) {
   const fen = useMemo(() => fenAtPly(parsed.moves, ply), [parsed.moves, ply]);
 
   useEffect(() => { setPly(0); }, [pgn]);
-  
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
-        return;
-      }
-      
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setPly(v => Math.min(parsed.moves.length, v + 1));
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setPly(v => Math.max(0, v - 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setPly(0);
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setPly(parsed.moves.length);
-      }
-    }
-    
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [parsed.moves.length]);
 
   if (matchState.loading || gameState.loading || (manualMatch ? players.loading : false)) {
     return (
@@ -225,11 +200,10 @@ export function MatchViewer({ matchId }: { matchId: string }) {
                   <button
                     type="button"
                     onClick={() => setPly(move.number * 2 - 1)}
-                    className={`rounded-sm px-2 py-2 text-left text-[11px] font-mono transition-colors duration-100 ${
-                      ply === move.number * 2 - 1
+                    className={`rounded-sm px-2 py-2 text-left text-[11px] font-mono transition-colors duration-100 ${ply === move.number * 2 - 1
                         ? "bg-[#b79262]/15 text-[#f2ca50]"
                         : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
-                    }`}
+                      }`}
                   >
                     {move.white}
                   </button>
@@ -237,11 +211,10 @@ export function MatchViewer({ matchId }: { matchId: string }) {
                     <button
                       type="button"
                       onClick={() => setPly(move.number * 2)}
-                      className={`rounded-sm px-2 py-2 text-left text-[11px] font-mono transition-colors duration-100 ${
-                        ply === move.number * 2
+                      className={`rounded-sm px-2 py-2 text-left text-[11px] font-mono transition-colors duration-100 ${ply === move.number * 2
                           ? "bg-[#b79262]/15 text-[#f2ca50]"
                           : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
-                      }`}
+                        }`}
                     >
                       {move.black}
                     </button>
