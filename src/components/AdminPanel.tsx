@@ -1119,13 +1119,19 @@ function LichessSyncScreen({ onDone }: { onDone: (message: string) => void }) {
     setStatus("saving");
     try {
       const token = await getIdToken();
-      await fetch("/api/admin/lichess-registry", {
+      const res = await fetch("/api/admin/lichess-registry", {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ tournamentIds, creatorUsernames })
       });
+      const data = await res.json();
       setStatus("idle");
-      onDone("Registry synchronization confirmed.");
+      if (data.syncResult) {
+        setSyncResult(data.syncResult);
+        onDone(`Registry updated. Processed ${data.syncResult.tournamentsProcessed} tournaments and ${data.syncResult.gamesProcessed} games.`);
+      } else {
+        onDone("Registry synchronization confirmed.");
+      }
     } catch (e) { setErrorMsg("Sync Failed"); setStatus("error"); }
   }
 
