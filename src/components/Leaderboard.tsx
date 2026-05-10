@@ -43,8 +43,8 @@ function PlayerStatsModal({ stats, onClose }: { stats: PlayerStats | null; onClo
               <p className="text-[10px] text-neutral-600 uppercase tracking-widest">{stats.matchesPlayed} games</p>
             </div>
           </div>
-          <div className="relative h-14 w-14">
-            <svg viewBox="0 0 32 32" className="h-full w-full -rotate-90">
+          <div className="relative h-14 w-14 rounded-full bg-[#1a1a1a]">
+            <svg viewBox="0 0 32 32" className="h-full w-full -rotate-90 rounded-full">
               <circle r="16" cx="16" cy="16" fill="#1a1a1a" />
               <circle r="16" cx="16" cy="16" fill="transparent" stroke="#b79262" strokeWidth="32"
                 strokeDasharray={`${stats.winRate * 1.0053} 100`} />
