@@ -400,7 +400,10 @@ export async function createTournament(input: {
 
 export async function updateTournament(id: string, input: Partial<Omit<Tournament, "id">>) {
   const { db } = servicesOrThrow();
-  await updateDoc(doc(db, "tournaments", id), input as DocumentData);
+  // Firestore does not accept undefined values in updates. 
+  // We strip them using JSON serialization to ensure only defined keys are sent.
+  const sanitized = JSON.parse(JSON.stringify(input));
+  await updateDoc(doc(db, "tournaments", id), sanitized as DocumentData);
 }
 
 export async function createPlayer(input: { name: string; elo: number | null }) {
