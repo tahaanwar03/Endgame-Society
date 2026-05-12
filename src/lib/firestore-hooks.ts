@@ -16,7 +16,7 @@ import {
 } from "firebase/firestore";
 import { getFirebaseServices } from "@/lib/firebase";
 import { createDefaultStages, normalizeStages } from "@/lib/standings";
-import type { Game, Match, MatchResult, Player, Tournament, TournamentSource, TournamentStage, TournamentStatus } from "@/lib/types";
+import type { Game, Match, MatchGame, MatchResult, Player, Tournament, TournamentSource, TournamentStage, TournamentStatus } from "@/lib/types";
 
 type CollectionState<T> = {
   data: T[];
@@ -506,6 +506,7 @@ export async function updateMatch(
     player2_id: string;
     result: MatchResult;
     pgn: string;
+    series: MatchGame[];
   }>
 ) {
   const { db } = servicesOrThrow();
