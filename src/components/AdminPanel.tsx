@@ -28,6 +28,7 @@ import {
 } from "@/lib/standings";
 import type {
   Match,
+  MatchGame,
   MatchResult,
   Player,
   Tournament,
