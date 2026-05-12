@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+export const dynamic = 'force-dynamic';
+
 import { getAdminDb } from "@/lib/firebase-admin";
 
 function isAdminEmail(email: string | undefined) {
