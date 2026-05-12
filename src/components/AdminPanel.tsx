@@ -635,7 +635,7 @@ function TournamentDetailScreen({
       )}
       {activeTab === "settings" && (
         <div className="mx-auto max-w-xl">
-          <TournamentSettingsForm tournament={tournament} onDone={onDone} />
+          <TournamentSettingsForm key={tournament.id} tournament={tournament} onDone={onDone} />
           <div className="mt-12 bg-red-950/20 border border-red-900/30 p-8">
             <h4 className="font-serif text-lg text-red-500 font-bold mb-2 uppercase tracking-wide">Danger Zone</h4>
             <p className="text-sm text-red-400/80 mb-6 font-sans">Purging this event will permanently delete all related match history and group metadata.</p>
@@ -666,6 +666,7 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
   const [limit, setLimit] = useState(tournament.clock?.limit ? tournament.clock.limit / 60 : 10);
   const [increment, setIncrement] = useState(tournament.clock?.increment ?? 0);
   const [stages, setStages] = useState<TournamentStage[]>(tournament.stages);
+  const [saving, setSaving] = useState(false);
 
   return (
     <section className="space-y-10">
@@ -674,16 +675,25 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
         <form
           onSubmit={async (event) => {
             event.preventDefault();
-            await updateTournament(tournament.id, {
-              name: name.trim(),
-              date,
-              rounds: Number(rounds),
-              status,
-              lichessId: lichessId.trim() || undefined,
-              clock: { limit: limit * 60, increment },
-              stages
-            });
-            onDone("Archive metadata synchronized.");
+            if (saving) return;
+            setSaving(true);
+            try {
+              await updateTournament(tournament.id, {
+                name: name.trim(),
+                date,
+                rounds: Number(rounds),
+                status,
+                lichessId: lichessId.trim() || "",
+                clock: { limit: limit * 60, increment },
+                stages
+              });
+              onDone("Archive metadata synchronized.");
+            } catch (err) {
+              console.error("Update failed:", err);
+              onDone("Failed to synchronize archive: " + (err instanceof Error ? err.message : "Unknown error"));
+            } finally {
+              setSaving(false);
+            }
           }}
           className="grid gap-6"
         >
@@ -764,8 +774,12 @@ function TournamentSettingsForm({ tournament, onDone }: { tournament: Tournament
             </div>
           </div>
 
-          <button className="mt-4 min-h-14 bg-white/[0.03] border border-white/[0.1] px-8 text-[10px] font-bold uppercase tracking-[0.2em] text-[#b79262] hover:bg-[#b79262]/10 transition-colors">
-            Commit Changes
+          <button
+            type="submit"
+            disabled={saving}
+            className="mt-4 min-h-14 bg-white/[0.03] border border-white/[0.1] px-8 text-[10px] font-bold uppercase tracking-[0.2em] text-[#b79262] hover:bg-[#b79262]/10 transition-colors disabled:opacity-50"
+          >
+            {saving ? "Synchronizing..." : "Commit Changes"}
           </button>
         </form>
       </section>
