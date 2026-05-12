@@ -999,9 +999,43 @@ function MatchDetailScreen({
   const [groupId, setGroupId] = useState(match.group_id ?? "");
   const [result, setResult] = useState<MatchResult>(match.result);
   const [pgn, setPgn] = useState(match.pgn ?? "");
+  const [series, setSeries] = useState<MatchGame[]>(match.series || []);
 
   const stage = tournament.stages.find((s) => s.id === stageId) || tournament.stages[0];
   const eligiblePlayers = players.filter(p => tournament.player_ids.includes(p.id));
+
+  const addGameToSeries = () => {
+    const lastGame = series[series.length - 1];
+    const newGame: MatchGame = {
+      id: `game-${Date.now()}`,
+      white_id: lastGame ? lastGame.black_id : player1Id,
+      black_id: lastGame ? lastGame.white_id : player2Id,
+      result: null,
+      pgn: ""
+    };
+    setSeries([...series, newGame]);
+  };
+
+  const calculateOverallResult = () => {
+    let p1Wins = 0;
+    let p2Wins = 0;
+    series.forEach(g => {
+      if (g.result === "1-0") {
+        if (g.white_id === player1Id) p1Wins += 1;
+        else p2Wins += 1;
+      } else if (g.result === "0-1") {
+        if (g.white_id === player1Id) p2Wins += 1;
+        else p1Wins += 1;
+      } else if (g.result === "1/2-1/2") {
+        p1Wins += 0.5;
+        p2Wins += 0.5;
+      }
+    });
+
+    if (p1Wins > p2Wins) setResult("1-0");
+    else if (p2Wins > p1Wins) setResult("0-1");
+    else if (p1Wins === p2Wins && series.length > 0) setResult("1/2-1/2");
+  };
 
   return (
     <section className="mx-auto max-w-2xl ring-1 ring-white/[0.08] bg-[#0b0b0b] p-8 md:p-12 animate-fade-up in-view">
@@ -1020,7 +1054,8 @@ function MatchDetailScreen({
             player1_id: player1Id,
             player2_id: player2Id,
             result,
-            pgn
+            pgn,
+            series: series.length > 0 ? series : undefined
           });
           onDone("Encounter records synchronized.");
           onBack();
@@ -1040,7 +1075,120 @@ function MatchDetailScreen({
         </div>
 
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Engagement Result</p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500">Match Series (Best of 3/5)</p>
+            <button
+              type="button"
+              onClick={addGameToSeries}
+              className="text-[9px] font-bold uppercase tracking-widest text-[#b79262] hover:text-[#f2ca50] transition-colors"
+            >
+              + Add Game to Series
+            </button>
+          </div>
+          
+          <div className="space-y-6">
+            {series.map((game, idx) => (
+              <div key={game.id} className="relative bg-white/[0.02] border border-white/[0.05] p-6 group/game">
+                <div className="flex items-center justify-between mb-6">
+                  <span className="text-[10px] font-black uppercase tracking-tighter text-[#b79262]/40">Game {idx + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSeries(series.filter((_, i) => i !== idx))}
+                    className="text-red-500/30 hover:text-red-500 transition-colors px-2 text-xl"
+                  >
+                    ×
+                  </button>
+                </div>
+                
+                <div className="grid gap-6 sm:grid-cols-2 mb-6">
+                  <div className="space-y-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-600 ml-1">Color Assignment</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = [...series];
+                          next[idx].white_id = player1Id;
+                          next[idx].black_id = player2Id;
+                          setSeries(next);
+                        }}
+                        className={`flex-1 min-h-10 text-[9px] font-bold uppercase tracking-widest border transition-all ${
+                          game.white_id === player1Id ? "bg-white/5 border-[#b79262]/50 text-white" : "border-white/5 text-neutral-500"
+                        }`}
+                      >
+                        P1 White / P2 Black
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = [...series];
+                          next[idx].white_id = player2Id;
+                          next[idx].black_id = player1Id;
+                          setSeries(next);
+                        }}
+                        className={`flex-1 min-h-10 text-[9px] font-bold uppercase tracking-widest border transition-all ${
+                          game.white_id === player2Id ? "bg-white/5 border-[#b79262]/50 text-white" : "border-white/5 text-neutral-500"
+                        }`}
+                      >
+                        P1 Black / P2 White
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-600 ml-1">Game Outcome</p>
+                    <div className="flex gap-2">
+                      {results.slice(0, 3).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            const next = [...series];
+                            next[idx].result = opt.value;
+                            setSeries(next);
+                          }}
+                          className={`flex-1 min-h-10 text-[9px] font-bold uppercase tracking-widest border transition-all ${
+                            game.result === opt.value ? "bg-[#b79262]/20 border-[#b79262] text-[#f2ca50]" : "border-white/5 text-neutral-600"
+                          }`}
+                        >
+                          {opt.value}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <label className="block">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-600 mb-2 ml-1">Game Tactical Log (PGN)</p>
+                  <textarea
+                    value={game.pgn}
+                    onChange={(e) => {
+                      const next = [...series];
+                      next[idx].pgn = e.target.value;
+                      setSeries(next);
+                    }}
+                    rows={4}
+                    className="w-full border border-white/10 bg-black/40 px-4 py-3 font-mono text-[10px] text-neutral-400 focus:border-[#b79262]/40 outline-none"
+                    placeholder={"[Event \"Game " + (idx + 1) + "\"]"}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+
+          {series.length > 0 && (
+            <button
+              type="button"
+              onClick={calculateOverallResult}
+              className="mt-4 w-full py-2 text-[9px] font-bold uppercase tracking-widest text-[#b79262]/60 hover:text-[#b79262] transition-colors border border-dashed border-[#b79262]/20"
+            >
+              Calculate Overall Match Result from Series
+            </button>
+          )}
+        </div>
+
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Overall Engagement Result</p>
           <div className="flex flex-wrap gap-2">
             {results.map((opt) => (
               <button
@@ -1057,16 +1205,18 @@ function MatchDetailScreen({
           </div>
         </div>
 
-        <label className="block">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Tactical Log (PGN)</p>
-          <textarea
-            value={pgn}
-            onChange={(e) => setPgn(e.target.value)}
-            rows={8}
-            className="w-full border border-white/[0.08] bg-black/40 px-6 py-4 font-mono text-xs text-neutral-300 focus:border-[#b79262]/40 outline-none"
-            placeholder={'[Event "Chess Society Round 1"]'}
-          />
-        </label>
+        {series.length === 0 && (
+          <label className="block">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Single Match Tactical Log (PGN)</p>
+            <textarea
+              value={pgn}
+              onChange={(e) => setPgn(e.target.value)}
+              rows={8}
+              className="w-full border border-white/[0.08] bg-black/40 px-6 py-4 font-mono text-xs text-neutral-300 focus:border-[#b79262]/40 outline-none"
+              placeholder={'[Event "Chess Society Round 1"]'}
+            />
+          </label>
+        )}
 
         <div className="flex flex-col gap-4 pt-6">
           <button className="min-h-14 bg-gradient-to-r from-[#b79262] to-[#f2ca50] px-8 text-[11px] font-bold uppercase tracking-[0.3em] text-black shadow-[0_10px_30px_rgba(183,146,98,0.15)] hover:shadow-[0_15px_40px_rgba(183,146,98,0.25)] transition-all">
@@ -1086,6 +1236,7 @@ function MatchDetailScreen({
           </button>
         </div>
       </form>
+
     </section>
   );
 }

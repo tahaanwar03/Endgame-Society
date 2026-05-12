@@ -51,6 +51,14 @@ export type Player = {
   elo: number | null;
 };
 
+export type MatchGame = {
+  id: string;
+  white_id: string;
+  black_id: string;
+  result: MatchResult;
+  pgn: string;
+};
+
 export type Match = {
   id: string;
   tournament_id: string;
@@ -61,6 +69,7 @@ export type Match = {
   stage_id: string;
   group_id: string | null;
   pgn?: string;
+  series?: MatchGame[];
   created_at?: unknown;
 };
 

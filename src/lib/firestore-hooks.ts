@@ -175,6 +175,15 @@ function normalizeMatch(id: string, data: DocumentData, tournaments: Tournament[
     stage_id: asString(data.stage_id) || inferStageId(round, fallbackStages),
     group_id: asString(data.group_id) || null,
     pgn: asString(data.pgn),
+    series: Array.isArray(data.series)
+      ? data.series.map((g: any) => ({
+          id: asString(g.id),
+          white_id: asString(g.white_id),
+          black_id: asString(g.black_id),
+          result: asResult(g.result),
+          pgn: asString(g.pgn)
+        }))
+      : undefined,
     created_at: data.created_at
   };
 }

@@ -47,14 +47,19 @@ export function MatchViewer({ matchId }: { matchId: string }) {
   const players = usePlayers();
   const { ref, width } = useBoardWidth();
   const [ply, setPly] = useState(0);
+  const [gameIdx, setGameIdx] = useState(0);
 
   const manualMatch = matchState.data;
   const lichessGame = !manualMatch ? gameState.data : null;
-  const pgn = manualMatch?.pgn ?? lichessGame?.movesPgn ?? "";
+  const hasSeries = !!(manualMatch?.series && manualMatch.series.length > 0);
+  const currentGame = hasSeries ? manualMatch!.series![gameIdx] : null;
+
+  const pgn = currentGame?.pgn ?? manualMatch?.pgn ?? lichessGame?.movesPgn ?? "";
   const parsed = useMemo(() => parsePgn(pgn), [pgn]);
   const fen = useMemo(() => fenAtPly(parsed.moves, ply), [parsed.moves, ply]);
 
   useEffect(() => { setPly(0); }, [pgn]);
+  useEffect(() => { setPly(0); }, [gameIdx]);
 
   if (matchState.loading || gameState.loading || (manualMatch ? players.loading : false)) {
     return (
@@ -81,13 +86,19 @@ export function MatchViewer({ matchId }: { matchId: string }) {
     );
   }
 
-  const whiteName = manualMatch
-    ? (!manualMatch.player1_id ? "TBD" : getPlayerName(players.data, manualMatch.player1_id))
-    : lichessGame!.white;
-  const blackName = manualMatch
-    ? (!manualMatch.player2_id ? "TBD" : getPlayerName(players.data, manualMatch.player2_id))
-    : lichessGame!.black;
-  const result = manualMatch?.result ?? lichessGame?.result ?? null;
+  const whiteName = currentGame
+    ? getPlayerName(players.data, currentGame.white_id)
+    : manualMatch
+      ? (!manualMatch.player1_id ? "TBD" : getPlayerName(players.data, manualMatch.player1_id))
+      : lichessGame!.white;
+
+  const blackName = currentGame
+    ? getPlayerName(players.data, currentGame.black_id)
+    : manualMatch
+      ? (!manualMatch.player2_id ? "TBD" : getPlayerName(players.data, manualMatch.player2_id))
+      : lichessGame!.black;
+
+  const result = currentGame?.result ?? manualMatch?.result ?? lichessGame?.result ?? null;
 
   const movePairs = Array.from({ length: Math.ceil(parsed.moves.length / 2) }, (_, i) => ({
     number: i + 1,
@@ -134,6 +145,23 @@ export function MatchViewer({ matchId }: { matchId: string }) {
 
         {/* Hairline divider */}
         <div className="mt-6 h-px bg-gradient-to-r from-transparent via-[#b79262]/30 to-transparent" />
+
+        {/* Series Selector */}
+        {hasSeries && (
+          <div className="mt-8 flex flex-wrap gap-2 justify-center">
+            {manualMatch!.series!.map((_, idx) => (
+              <button
+                key={idx}
+                onClick={() => setGameIdx(idx)}
+                className={`min-h-11 px-6 text-[10px] font-bold uppercase tracking-[0.2em] transition-all border ${
+                  gameIdx === idx ? "bg-[#b79262]/20 border-[#b79262] text-[#f2ca50]" : "border-white/5 text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                Game {idx + 1}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       {!pgn.trim() ? (
