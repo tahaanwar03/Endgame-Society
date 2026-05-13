@@ -447,6 +447,7 @@ function CreatePlayerForm({ onDone, players }: { onDone: (message: string) => vo
 
 function BulkPlayerImportForm({ onDone }: { onDone: (message: string) => void }) {
   const [rawLines, setRawLines] = useState("");
+  const [saving, setSaving] = useState(false);
 
   return (
     <section className="relative ring-1 ring-white/[0.05] bg-[#0b0b0b] p-8 md:p-10">
@@ -454,11 +455,19 @@ function BulkPlayerImportForm({ onDone }: { onDone: (message: string) => void })
       <form
         onSubmit={async (event) => {
           event.preventDefault();
+          if (saving) return;
           const parsed = parseBulkPlayers(rawLines);
           if (!parsed.ok) { onDone(parsed.error); return; }
-          await createPlayersBulk(parsed.players);
-          setRawLines("");
-          onDone(`Import successful: ${parsed.players.length} records processed.`);
+          setSaving(true);
+          try {
+            await createPlayersBulk(parsed.players);
+            setRawLines("");
+            onDone(`Import successful: ${parsed.players.length} records processed.`);
+          } catch (err) {
+            onDone("Failed to process batch: " + (err instanceof Error ? err.message : "Unknown error"));
+          } finally {
+            setSaving(false);
+          }
         }}
       >
         <textarea
@@ -468,8 +477,11 @@ function BulkPlayerImportForm({ onDone }: { onDone: (message: string) => void })
           className="w-full border border-white/[0.08] bg-black/40 px-6 py-4 font-mono text-xs text-neutral-300 focus:border-[#b79262]/40 outline-none"
           placeholder={"Name, ELO"}
         />
-        <button className="mt-4 min-h-12 border border-[#b79262]/20 px-6 text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 hover:text-neutral-200 transition-colors">
-          Process Batch
+        <button 
+          disabled={saving}
+          className="mt-4 min-h-12 border border-[#b79262]/20 px-6 text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 hover:text-neutral-200 transition-colors disabled:opacity-50"
+        >
+          {saving ? "Processing..." : "Process Batch"}
         </button>
       </form>
     </section>
@@ -479,6 +491,7 @@ function BulkPlayerImportForm({ onDone }: { onDone: (message: string) => void })
 function PlayerEditorRow({ player, tournaments, matches, onDone }: { player: Player; tournaments: Tournament[]; matches: Match[]; onDone: (message: string) => void }) {
   const [name, setName] = useState(player.name);
   const [eloInput, setEloInput] = useState(player.elo === null ? "" : String(player.elo));
+  const [saving, setSaving] = useState(false);
   const assignedTournamentIds = tournaments.filter((tournament) => tournament.player_ids.includes(player.id)).map((tournament) => tournament.id);
   const usedInMatches = matches.some((match) => match.player1_id === player.id || match.player2_id === player.id);
 
@@ -486,16 +499,27 @@ function PlayerEditorRow({ player, tournaments, matches, onDone }: { player: Pla
     <form
       onSubmit={async (event) => {
         event.preventDefault();
+        if (saving) return;
         const elo = parseEloInput(eloInput);
-        await updatePlayer(player.id, { name: name.trim(), elo });
-        onDone(`Profile synchronized: ${name.trim()}.`);
+        setSaving(true);
+        try {
+          await updatePlayer(player.id, { name: name.trim(), elo });
+          onDone(`Profile synchronized: ${name.trim()}.`);
+        } catch (err) {
+          onDone("Failed to update profile: " + (err instanceof Error ? err.message : "Unknown error"));
+        } finally {
+          setSaving(false);
+        }
       }}
       className="grid gap-6 border-b border-white/[0.05] pb-6 lg:grid-cols-[1fr_120px_100px_100px] lg:items-end px-2"
     >
       <TextInput label="Identity" value={name} onChange={setName} required />
       <TextInput label="Rating" value={eloInput} onChange={setEloInput} type="number" min={0} />
-      <button className="min-h-12 border border-[#b79262]/30 px-4 text-[10px] font-bold uppercase tracking-[0.2em] text-[#f2ca50] hover:bg-[#b79262]/5 transition-colors">
-        Update
+      <button 
+        disabled={saving}
+        className="min-h-12 border border-[#b79262]/30 px-4 text-[10px] font-bold uppercase tracking-[0.2em] text-[#f2ca50] hover:bg-[#b79262]/5 transition-colors disabled:opacity-50"
+      >
+        {saving ? "..." : "Update"}
       </button>
       <button
         type="button"
@@ -576,11 +600,21 @@ function CreateTournamentForm({ onDone }: { onDone: (message: string) => void })
   const [rounds, setRounds] = useState(4);
   const [status, setStatus] = useState<TournamentStatus>("upcoming");
 
+  const [saving, setSaving] = useState(false);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await createTournament({ name: name.trim(), date, rounds, status, source: "manual", stages: createDefaultStages(rounds) });
-    setName(""); setDate(""); setRounds(4); setStatus("upcoming");
-    onDone("New event record initialized.");
+    if (saving) return;
+    setSaving(true);
+    try {
+      await createTournament({ name: name.trim(), date, rounds, status, source: "manual", stages: createDefaultStages(rounds) });
+      setName(""); setDate(""); setRounds(4); setStatus("upcoming");
+      onDone("New event record initialized.");
+    } catch (err) {
+      onDone("Failed to initialize event: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -591,8 +625,11 @@ function CreateTournamentForm({ onDone }: { onDone: (message: string) => void })
         <TextInput label="Sanctioned Date" value={date} onChange={setDate} type="date" required />
         <TextInput label="Round Count" value={String(rounds)} onChange={(v) => setRounds(Number(v))} type="number" min={1} required />
         <SelectInput label="Official Status" value={status} onChange={(v) => setStatus(v as TournamentStatus)} options={statuses} className="sm:col-span-2" />
-        <button className="mt-4 min-h-14 bg-gradient-to-r from-[#b79262] to-[#f2ca50] px-8 text-[11px] font-bold uppercase tracking-[0.3em] text-black hover:opacity-90 transition-all duration-300 sm:col-span-2 font-sans">
-          Create Archive
+        <button 
+          disabled={saving}
+          className="mt-4 min-h-14 bg-gradient-to-r from-[#b79262] to-[#f2ca50] px-8 text-[11px] font-bold uppercase tracking-[0.3em] text-black hover:opacity-90 transition-all duration-300 sm:col-span-2 font-sans disabled:opacity-50"
+        >
+          {saving ? "Initializing..." : "Create Archive"}
         </button>
       </form>
     </section>
@@ -899,6 +936,7 @@ function TournamentStagesForm({
   onOpenMatch: (matchId: string) => void;
 }) {
   const [selectedStageId, setSelectedStageId] = useState(tournament.stages[0]?.id ?? "");
+  const [creating, setCreating] = useState(false);
   const activeStage = tournament.stages.find((s) => s.id === selectedStageId) ?? tournament.stages[0];
 
   if (!activeStage) return null;
@@ -922,21 +960,29 @@ function TournamentStagesForm({
           ))}
         </div>
         <button
+          disabled={creating}
           onClick={async () => {
-            const firstGroup = activeStage.type === "group" ? (activeStage.groups?.[0] ?? "A") : null;
-            const id = await createMatch({
-              tournament_id: tournament.id,
-              stage_id: activeStage.id,
-              round: activeStage.round,
-              group_id: firstGroup,
-              player1_id: "",
-              player2_id: ""
-            });
-            onOpenMatch(id);
+            setCreating(true);
+            try {
+              const firstGroup = activeStage.type === "group" ? (activeStage.groups?.[0] ?? "A") : null;
+              const id = await createMatch({
+                tournament_id: tournament.id,
+                stage_id: activeStage.id,
+                round: activeStage.round,
+                group_id: firstGroup,
+                player1_id: "",
+                player2_id: ""
+              });
+              onOpenMatch(id);
+            } catch (err) {
+              onDone("Failed to initialize encounter: " + (err instanceof Error ? err.message : "Unknown error"));
+            } finally {
+              setCreating(false);
+            }
           }}
-          className="min-h-11 border border-[#b79262] px-6 text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50] shadow-[0_0_20px_rgba(183,146,98,0.1)] hover:bg-[#b79262]/5"
+          className="min-h-11 border border-[#b79262] px-6 text-[10px] font-bold uppercase tracking-[0.22em] text-[#f2ca50] shadow-[0_0_20px_rgba(183,146,98,0.1)] hover:bg-[#b79262]/5 disabled:opacity-30"
         >
-          Initialize Match
+          {creating ? "Allocating..." : "Initialize Match"}
         </button>
       </div>
 
@@ -1001,6 +1047,7 @@ function MatchDetailScreen({
   const [result, setResult] = useState<MatchResult>(match.result);
   const [pgn, setPgn] = useState(match.pgn ?? "");
   const [series, setSeries] = useState<MatchGame[]>(match.series || []);
+  const [saving, setSaving] = useState(false);
 
   const stage = tournament.stages.find((s) => s.id === stageId) || tournament.stages[0];
   const eligiblePlayers = players.filter(p => tournament.player_ids.includes(p.id));
@@ -1048,18 +1095,27 @@ function MatchDetailScreen({
       <form
         onSubmit={async (event) => {
           event.preventDefault();
-          await updateMatch(match.id, {
-            round: stage.round,
-            stage_id: stageId,
-            group_id: stage.type === "group" ? groupId : null,
-            player1_id: player1Id,
-            player2_id: player2Id,
-            result,
-            pgn,
-            series: series.length > 0 ? series : undefined
-          });
-          onDone("Encounter records synchronized.");
-          onBack();
+          if (saving) return;
+          setSaving(true);
+          try {
+            await updateMatch(match.id, {
+              round: stage.round,
+              stage_id: stageId,
+              group_id: stage.type === "group" ? groupId : null,
+              player1_id: player1Id,
+              player2_id: player2Id,
+              result,
+              pgn,
+              series: series.length > 0 ? series : undefined
+            });
+            onDone("Encounter records synchronized.");
+            onBack();
+          } catch (err) {
+            console.error("Match update failed:", err);
+            onDone("Failed to synchronize encounter: " + (err instanceof Error ? err.message : "Unknown error"));
+          } finally {
+            setSaving(false);
+          }
         }}
         className="grid gap-8"
       >
@@ -1220,8 +1276,12 @@ function MatchDetailScreen({
         )}
 
         <div className="flex flex-col gap-4 pt-6">
-          <button className="min-h-14 bg-gradient-to-r from-[#b79262] to-[#f2ca50] px-8 text-[11px] font-bold uppercase tracking-[0.3em] text-black shadow-[0_10px_30px_rgba(183,146,98,0.15)] hover:shadow-[0_15px_40px_rgba(183,146,98,0.25)] transition-all">
-            Commit Records
+          <button
+            type="submit"
+            disabled={saving}
+            className="min-h-14 bg-gradient-to-r from-[#b79262] to-[#f2ca50] px-8 text-[11px] font-bold uppercase tracking-[0.3em] text-black shadow-[0_10px_30px_rgba(183,146,98,0.15)] hover:shadow-[0_15px_40px_rgba(183,146,98,0.25)] transition-all disabled:opacity-50"
+          >
+            {saving ? "Synchronizing..." : "Commit Records"}
           </button>
           <button
             type="button"

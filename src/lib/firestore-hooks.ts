@@ -128,6 +128,14 @@ function inferStageId(round: number, stages: TournamentStage[]) {
   return exact?.id ?? stages[0]?.id ?? "group-stage";
 }
 
+/**
+ * Strips 'undefined' values from an object recursively to prevent Firestore crashes.
+ * JSON serialization is the most reliable way to handle deep nesting/arrays for POJOs.
+ */
+function sanitize<T>(data: T): T {
+  return JSON.parse(JSON.stringify(data, (key, value) => (value === undefined ? null : value)));
+}
+
 function normalizeTournament(id: string, data: DocumentData): Tournament {
   const source = asSource(data.source);
   const rounds = asNumber(data.rounds, 1);
@@ -397,7 +405,7 @@ export async function createTournament(input: {
   stages?: TournamentStage[];
 }) {
   const { db } = servicesOrThrow();
-  await addDoc(collection(db, "tournaments"), {
+  const data = sanitize({
     ...input,
     source: input.source || "manual",
     standings: [],
@@ -405,14 +413,12 @@ export async function createTournament(input: {
     stages: input.stages || createDefaultStages(input.rounds),
     group_assignments: {}
   });
+  await addDoc(collection(db, "tournaments"), data);
 }
 
 export async function updateTournament(id: string, input: Partial<Omit<Tournament, "id">>) {
   const { db } = servicesOrThrow();
-  // Firestore does not accept undefined values in updates. 
-  // We strip them using JSON serialization to ensure only defined keys are sent.
-  const sanitized = JSON.parse(JSON.stringify(input));
-  await updateDoc(doc(db, "tournaments", id), sanitized as DocumentData);
+  await updateDoc(doc(db, "tournaments", id), sanitize(input) as DocumentData);
 }
 
 export async function createPlayer(input: { name: string; elo: number | null }) {
@@ -426,7 +432,7 @@ export async function createPlayersBulk(inputs: Array<{ name: string; elo: numbe
 
   for (const input of inputs) {
     const playerRef = doc(collection(db, "players"));
-    batch.set(playerRef, input);
+    batch.set(playerRef, sanitize(input));
   }
 
   await batch.commit();
@@ -486,12 +492,13 @@ export async function createMatch(input: {
   player2_id: string;
 }) {
   const { db } = servicesOrThrow();
-  const docRef = await addDoc(collection(db, "matches"), {
+  const data = sanitize({
     ...input,
     result: null,
     pgn: "",
     created_at: serverTimestamp()
   });
+  const docRef = await addDoc(collection(db, "matches"), data);
   return docRef.id;
 }
 
@@ -510,7 +517,7 @@ export async function updateMatch(
   }>
 ) {
   const { db } = servicesOrThrow();
-  await updateDoc(doc(db, "matches", id), input as DocumentData);
+  await updateDoc(doc(db, "matches", id), sanitize(input) as DocumentData);
 }
 
 export async function deleteMatch(id: string) {
