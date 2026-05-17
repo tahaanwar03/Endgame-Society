@@ -27,8 +27,19 @@ function useBoardWidth() {
 function parsePgn(pgn?: string) {
   if (!pgn?.trim()) return { moves: [] as string[], error: null };
   try {
+    const raw = pgn.trim();
+    const lines = raw.split(/\r?\n/);
+    const startIndex = lines.findIndex(l => {
+      const t = l.trim();
+      return t.startsWith("[") || t.startsWith("1.");
+    });
+    
+    // Fallback to original if we don't find a valid starting line,
+    // otherwise use the truncated version that skips preamble text.
+    const cleaned = startIndex > 0 ? lines.slice(startIndex).join("\n") : raw;
+
     const game = new Chess();
-    game.loadPgn(pgn);
+    game.loadPgn(cleaned);
     return { moves: game.history(), error: null };
   } catch (error) {
     return { moves: [] as string[], error: error instanceof Error ? error.message : "Invalid PGN." };
