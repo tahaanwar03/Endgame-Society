@@ -5,12 +5,13 @@ type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string
 type LichessTournamentApiResponse = {
   id?: string;
   fullName?: string;
+  name?: string;
   createdBy?: string;
   minutes?: number;
   clock?: { limit?: number; increment?: number };
-  startsAt?: number;
-  finishesAt?: number;
-  createdAt?: number;
+  startsAt?: number | string;
+  finishesAt?: number | string;
+  createdAt?: number | string;
   isFinished?: boolean;
   isStarted?: boolean;
   nbPlayers?: number;
@@ -21,6 +22,7 @@ type LichessResultApiResponse = {
   rank?: number;
   score?: number;
   username?: string;
+  name?: string; // Sometimes user is just a string, check downstream
 };
 
 type LichessGameApiResponse = {
@@ -199,11 +201,11 @@ export async function fetchTournamentData(tournamentId: string) {
   let data = await fetchJson<LichessTournamentApiResponse>(`/api/tournament/${tournamentId}`);
 
   // If not found or looks like Swiss (missing Arena-only fields), try Swiss API
-  if (!data?.id || !data.fullName) {
+  if (!data?.id || (!data.fullName && !data.name)) {
     data = await fetchJson<LichessTournamentApiResponse>(`/api/swiss/${tournamentId}`);
   }
 
-  if (!data?.id || !data.fullName) {
+  if (!data?.id || (!data.fullName && !data.name)) {
     return null;
   }
 
@@ -213,7 +215,7 @@ export async function fetchTournamentData(tournamentId: string) {
 
   return {
     lichessId: data.id,
-    name: data.fullName,
+    name: data.fullName || data.name || "Unknown Tournament",
     status: normalizeTournamentStatus(data),
     createdAt,
     startedAt,
@@ -226,7 +228,15 @@ export async function fetchTournamentData(tournamentId: string) {
 }
 
 export async function fetchTournamentResults(tournamentId: string) {
-  const text = await fetchText(`/api/tournament/${tournamentId}/results`, "application/x-ndjson");
+  let text = await fetchText(`/api/tournament/${tournamentId}/results`, "application/x-ndjson");
+  
+  // If not found, try the Swiss API endpoint
+  if (!text) {
+    text = await fetchText(`/api/swiss/${tournamentId}/results`, "application/x-ndjson");
+  }
+  
+  if (!text) return [];
+
   const parsed = parseNdjson<LichessResultApiResponse>(text);
 
   return parsed
@@ -241,10 +251,21 @@ export async function fetchTournamentResults(tournamentId: string) {
 }
 
 export async function fetchTournamentGames(tournamentId: string) {
-  const text = await fetchText(
+  let text = await fetchText(
     `/api/tournament/${tournamentId}/games?moves=false&clocks=false&evals=false&opening=false&pgnInJson=false`,
     "application/x-ndjson"
   );
+
+  // If not found, try the Swiss API endpoint
+  if (!text) {
+    text = await fetchText(
+      `/api/swiss/${tournamentId}/games?moves=false&clocks=false&evals=false&opening=false&pgnInJson=false`,
+      "application/x-ndjson"
+    );
+  }
+
+  if (!text) return [];
+
   const parsed = parseNdjson<LichessGameApiResponse>(text);
 
   return parsed
